@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>看懂 K8s：从一家汉堡店开始</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --card:#fff; --ink:#1d2433; --muted:#5b6578; --line:#e3e8f0;
+    --brand:#1f6fd1; --brand-soft:#e8f1fc;
+    --c-cluster:#475569; --c-pod:#16a34a; --c-workload:#1f6fd1; --c-service:#ea8a0c;
+    --c-ingress:#7c3aed; --c-helm:#0d9488; --c-registry:#db2777;
+    --ok:#15803d; --ok-bg:#e9f8ee; --warn:#b45309; --warn-bg:#fff5e6;
+    --fx-create:#16a34a; --fx-modify:#d97706; --fx-read:#2563eb; --fx-delete:#dc2626; --fx-local:#64748b; --fx-field:#7c3aed;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  header{background:linear-gradient(135deg,#1f6fd1,#3b8cf0);color:#fff;padding:36px 20px 28px}
+  header .wrap{max-width:1320px;margin:0 auto}
+  header h1{margin:0 0 6px;font-size:28px}
+  header p{margin:0;opacity:.9}
+  nav{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--line)}
+  nav .wrap{max-width:1320px;margin:0 auto;display:flex;gap:4px;overflow-x:auto;padding:0 12px}
+  nav a{white-space:nowrap;color:var(--muted);text-decoration:none;padding:12px 12px;border-bottom:2px solid transparent;font-size:14px}
+  nav a:hover{color:var(--brand);border-color:var(--brand)}
+  main{max-width:1320px;margin:0 auto;padding:8px 16px 80px}
+  section{margin-top:36px}
+  h2{font-size:21px;margin:0 0 4px;color:var(--brand)}
+  .lead{color:var(--muted);margin:0 0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  code,.mono{font-family:var(--mono);font-size:13px}
+  :not(pre)>code{background:#eef2f7;padding:1px 6px;border-radius:5px}
+
+  /* 架构图 */
+  .arch{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:16px;align-items:start}
+  .arch svg{width:100%;height:auto;display:block}
+  .node{cursor:pointer}
+  .node rect,.node circle{transition:stroke-width .15s, filter .15s}
+  .node:hover rect.box,.node.active rect.box{stroke-width:3.5;filter:drop-shadow(0 4px 10px rgba(0,0,0,.12))}
+  .dim .node:not(.active){opacity:.35}
+  svg text{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  .detail h3{margin:0 0 2px;font-size:19px}
+  .detail .en{color:var(--muted);font-size:13px;margin-bottom:10px}
+  .detail .quote{background:var(--brand-soft);border-left:4px solid var(--brand);padding:8px 12px;border-radius:6px;margin:8px 0;font-size:14px}
+  .detail .meta{font-size:14px}
+  .detail .meta b{display:inline-block;min-width:64px;color:var(--muted);font-weight:600}
+  .detail ul{padding-left:18px;margin:6px 0}
+  .btn{border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:8px;padding:7px 14px;font-size:14px;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--brand)}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+  /* 概念卡片 */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+  .concept{border-top:4px solid var(--c);cursor:pointer}
+  .concept h4{margin:0;font-size:16px;display:flex;align-items:center;gap:8px}
+  .concept .tag{font-size:12px;color:var(--c);border:1px solid var(--c);border-radius:20px;padding:0 8px}
+  .concept .analogy{margin:6px 0 0;color:var(--muted);font-size:14px}
+
+  /* 流程 */
+  .flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  .step-col{display:flex;flex-direction:column;gap:6px}
+  .fbox{background:var(--brand);color:#fff;border-radius:8px;padding:10px;text-align:center;font-weight:600;position:relative}
+  .step-col:not(:last-child) .fbox::after{content:"→";position:absolute;right:-14px;top:50%;transform:translateY(-50%);color:var(--brand);font-weight:700}
+  .fsub{border:1px dashed #8fb3e6;color:#2b5aa0;background:#f2f7fe;border-radius:6px;padding:4px 8px;text-align:center;font-size:13px}
+  .local{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+  .local b{color:var(--c-pod)}
+  .row-label{font-size:12px;color:var(--muted);margin:2px 0}
+
+  /* 实践：两栏布局 */
+  .lab-grid{display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:16px;align-items:start}
+  .howto{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:13px}
+  .lg{display:inline-flex;align-items:center;gap:5px}
+  .lg i{width:12px;height:12px;border-radius:3px;display:inline-block}
+  .progress{display:flex;align-items:center;gap:12px;margin:14px 0}
+  .bar{flex:1;height:8px;background:#e6ebf2;border-radius:6px;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--c-pod);transition:width .3s}
+  .step{margin-bottom:14px}
+  .step summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .step summary::-webkit-details-marker{display:none}
+  .num{width:30px;height:30px;border-radius:50%;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-weight:700;flex:none}
+  .step.done .num{background:var(--c-pod);color:#fff}
+  .step h3{margin:0;font-size:17px;flex:1;min-width:180px}
+  .badge{font-size:12px;border-radius:20px;padding:1px 9px;white-space:nowrap}
+  .badge.ok{color:var(--ok);background:var(--ok-bg)}
+  .badge.warn{color:var(--warn);background:var(--warn-bg)}
+  .badge.part{color:#1d4ed8;background:#e8efff}
+  .chip{font-size:12px;border-radius:20px;padding:1px 8px;color:#fff}
+  .step .body{margin-top:12px}
+  .step .why{color:var(--muted);margin:0 0 8px}
+  .blk{margin:10px 0}
+  .blk .label{font-size:12px;color:var(--muted);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .copy{font-size:12px;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:6px;padding:1px 9px;cursor:pointer;flex:none}
+  .code{background:#0f172a;border-radius:10px;padding:8px 0;overflow-x:auto}
+  .code-in{display:inline-block;min-width:100%}
+  .ln{font:13px/1.6 var(--mono);color:#e2e8f0;white-space:pre;padding:1px 14px 1px 11px;border-left:4px solid transparent;cursor:pointer}
+  .ln[data-fx=create]{border-left-color:#16a34a99}
+  .ln[data-fx=modify]{border-left-color:#d9770699}
+  .ln[data-fx=read]{border-left-color:#2563eb99}
+  .ln[data-fx=delete]{border-left-color:#dc262699}
+  .ln[data-fx=local]{border-left-color:#64748b88}
+  .ln[data-fx=field]{border-left-color:#7c3aed55}
+  .ln[data-fx=comment]{color:#7dd3a0}
+  .ln:hover,.ln.on{background:#1e3a5f}
+  .ln.pin{background:#3b3413;box-shadow:inset 0 0 0 1px #facc15}
+  .ln .cm{color:#7dd3a0}
+  .ln .yk{color:#93c5fd}
+  .ln .df{color:#f9a8d4}
+  .expect{background:#f1f5f9;border-radius:8px;padding:10px 12px;font-size:13px;margin-top:8px}
+  .expect pre{background:transparent;color:#334155;padding:0;margin:4px 0 0;font:13px/1.55 var(--mono);white-space:pre-wrap}
+  .note{background:var(--warn-bg);color:#7c4a03;border-radius:8px;padding:8px 12px;font-size:13px;margin-top:8px}
+  .donebox{display:flex;align-items:center;gap:6px;font-size:14px;margin-top:10px;color:var(--muted);cursor:pointer;user-select:none}
+
+  /* 右侧面板 */
+  .panel{position:sticky;top:56px;max-height:calc(100vh - 68px);display:flex;flex-direction:column;gap:10px}
+  .panel .card{padding:12px}
+  .panel-h{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .panel-h b{color:var(--ink)}
+  #togglePanel{display:none}
+  .dg{font-size:12px;line-height:1.3}
+  .zone{border:1px solid var(--line);border-radius:10px;padding:6px;margin-bottom:6px;background:#fbfcfe}
+  .zt{font-size:11px;color:var(--muted);font-weight:600;margin:0 0 4px 2px}
+  .rw{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+  .rw + .rw{margin-top:5px}
+  .rw i{color:#94a3b8;font-style:normal}
+  .bx{position:relative;border:1px solid #cbd5e1;background:#fff;border-radius:7px;padding:4px 7px;transition:all .15s;cursor:help}
+  .bx.sm{padding:2px 6px;font-size:11px}
+  .bx.pod{flex:1}
+  .bx .rw{margin-top:4px}
+  .ns{border:1px dashed #94a3b8;border-radius:9px;padding:6px;margin-top:6px;position:relative;transition:all .15s}
+  .dg.active .bx:not(.lit){opacity:.38}
+  .dg.active .bx.lit .bx:not(.lit){opacity:.6}
+  .lit{opacity:1 !important}
+  .lit.fx-create{border-color:var(--fx-create);background:#dcfce7;box-shadow:0 0 0 2px #16a34a55}
+  .lit.fx-modify{border-color:var(--fx-modify);background:#fef3c7;box-shadow:0 0 0 2px #d9770655}
+  .lit.fx-read{border-color:var(--fx-read);background:#dbeafe;box-shadow:0 0 0 2px #2563eb55}
+  .lit.fx-delete{border-color:var(--fx-delete);background:#fee2e2;box-shadow:0 0 0 2px #dc262655;text-decoration:line-through}
+  .lit.fx-local{border-color:var(--fx-local);background:#f1f5f9;box-shadow:0 0 0 2px #64748b44}
+  .lit.fx-field{border-color:var(--fx-field);background:#ede9fe;box-shadow:0 0 0 2px #7c3aed44}
+  .lit[data-badge]::after{content:attr(data-badge);position:absolute;top:-9px;right:-6px;font-size:10px;color:#fff;border-radius:8px;padding:0 5px;line-height:16px;z-index:2}
+  .lit.fx-create::after{background:var(--fx-create)} .lit.fx-modify::after{background:var(--fx-modify)}
+  .lit.fx-read::after{background:var(--fx-read)} .lit.fx-delete::after{background:var(--fx-delete)}
+  .lit.fx-local::after{background:var(--fx-local)} .lit.fx-field::after{background:var(--fx-field)}
+  .lit.fx-use{border-color:#94a3b8;background:#f8fafc;box-shadow:0 0 0 2px #94a3b844;border-style:dashed}
+  .lit.fx-use::after{background:#94a3b8}
+  .ns.lit{background:#f8fafc}
+  .explain{overflow:auto;flex:1;min-height:160px}
+  .ex-cmd{font:13px/1.5 var(--mono);background:#0f172a;color:#e2e8f0;border-radius:8px;padding:8px 10px;white-space:pre-wrap;word-break:break-all}
+  .fxb{display:inline-block;margin:8px 6px 0 0;font-size:12px;border-radius:20px;padding:1px 10px;color:#fff}
+  .fxb.fx-create{background:var(--fx-create)} .fxb.fx-modify{background:var(--fx-modify)} .fxb.fx-read{background:var(--fx-read)}
+  .fxb.fx-delete{background:var(--fx-delete)} .fxb.fx-local{background:var(--fx-local)} .fxb.fx-field{background:var(--fx-field)} .fxb.fx-comment{background:#15803d}
+  .ex-path{display:inline-block;margin-top:8px;font:12px var(--mono);color:var(--fx-field);background:#f5f3ff;border-radius:6px;padding:1px 8px}
+  .ex-d{margin:8px 0;font-size:14px}
+  .ex-h{font-size:12px;color:var(--muted);font-weight:600;margin:10px 0 4px}
+  .ex-args{width:100%;border-collapse:collapse;font-size:13px}
+  .ex-args td{border-top:1px solid var(--line);padding:4px 6px;vertical-align:top}
+  .ex-args td:first-child{font-family:var(--mono);white-space:nowrap;color:#0f172a;background:#f8fafc}
+  .ex-flow{display:flex;flex-direction:column;gap:3px;font-size:13px}
+  .ex-flow div{display:flex;gap:6px;align-items:flex-start}
+  .ex-flow b{flex:none;width:18px;height:18px;border-radius:50%;background:var(--brand-soft);color:var(--brand);font-size:11px;display:grid;place-items:center;margin-top:2px}
+  .ex-out{background:#f1f5f9;border-radius:8px;padding:8px 10px;font:12px/1.5 var(--mono);white-space:pre-wrap;margin:0}
+  .ex-tip{background:var(--warn-bg);color:#7c4a03;border-radius:8px;padding:6px 10px;font-size:13px;margin-top:8px}
+  .ex-tg{display:flex;flex-wrap:wrap;gap:5px}
+  .ex-tg span{font-size:12px;background:#f1f5f9;border-radius:6px;padding:1px 8px}
+  .pinhint{font-size:12px;color:#a16207}
+
+  /* 常见坑 */
+  .pit{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:10px 16px;border-top:1px solid var(--line);padding:10px 0;font-size:14px}
+  .pit:first-child{border-top:0}
+  .pit .sym{font-family:var(--mono);font-size:13px;color:#b91c1c}
+
+  @media (max-width:1100px){
+    .lab-grid{grid-template-columns:1fr}
+    .panel{position:fixed;left:8px;right:8px;bottom:8px;top:auto;max-height:52vh;overflow:auto;z-index:20;box-shadow:0 -6px 24px rgba(15,23,42,.18);border-radius:14px;background:var(--bg);padding:6px}
+    .panel.collapsed .dg-card,.panel.collapsed .explain{display:none}
+    #togglePanel{display:inline-block}
+    body{padding-bottom:54vh}
+    .dg{font-size:11px}
+  }
+  @media (max-width:860px){
+    .arch{grid-template-columns:1fr}
+    .flow{grid-template-columns:1fr}
+    .step-col:not(:last-child) .fbox::after{content:"↓";right:auto;left:50%;top:auto;bottom:-20px;transform:translateX(-50%)}
+    .step-col{margin-bottom:12px}
+    .pit{grid-template-columns:1fr}
+    header h1{font-size:23px}
+  }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>🍔 看懂 Kubernetes：从一家汉堡店开始</h1>
+  <p>把 TKE 产品概念（集群 / Pod / 工作负载 / Service / Ingress / Helm / 镜像仓库）放进一张图，再在本机 colima k3s v1.34.1 上动手跑一遍。</p>
+</div></header>
+<nav><div class="wrap">
+  <a href="#map">① 全景图</a><a href="#concepts">② 七个概念</a><a href="#flow">③ TKE 流程 ↔ 本机</a><a href="#lab">④ 动手实践（逐行讲解）</a><a href="#pits">⑤ 常见坑</a>
+</div></nav>
+
+<main>
+<section id="map">
+  <h2>① 一张图看懂：请求从哪来，到哪去</h2>
+  <p class="lead">点击图中任意方块查看解释；点「模拟一次请求」看流量怎么走。</p>
+  <div class="arch">
+    <div class="card" id="archCard">
+      <svg viewBox="0 0 1000 560" id="archSvg" role="img" aria-label="Kubernetes 架构图">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+        </defs>
+        <g class="node" data-k="cluster">
+          <rect class="box" x="130" y="16" width="856" height="428" rx="18" fill="#f8fafc" stroke="var(--c-cluster)" stroke-width="2"/>
+          <text x="152" y="46" font-size="17" font-weight="700" fill="var(--c-cluster)">集群 Cluster</text>
+          <text x="262" y="46" font-size="13" fill="#64748b">本机：colima · k3s v1.34.1 · 节点 colima ｜ TKE：若干台 CVM + CLB</text>
+        </g>
+        <g class="node" data-k="helm">
+          <rect class="box" x="148" y="150" width="210" height="212" rx="12" fill="none" stroke="var(--c-helm)" stroke-width="2" stroke-dasharray="7 5"/>
+          <text x="160" y="172" font-size="13" font-weight="700" fill="var(--c-helm)">Helm Release: traefik</text>
+          <text x="160" y="350" font-size="12" fill="var(--c-helm)">一条 helm install 装好的一整套</text>
+        </g>
+        <g class="node" data-k="ingress">
+          <rect class="box" x="166" y="196" width="174" height="128" rx="10" fill="#f5f0ff" stroke="var(--c-ingress)" stroke-width="2"/>
+          <text x="253" y="228" text-anchor="middle" font-size="17" font-weight="700" fill="var(--c-ingress)">Ingress</text>
+          <text x="253" y="252" text-anchor="middle" font-size="12" fill="#5b21b6">路由规则</text>
+          <text x="253" y="272" text-anchor="middle" font-size="12" fill="#5b21b6" font-family="var(--mono)">burger.local/</text>
+          <text x="253" y="290" text-anchor="middle" font-size="12" fill="#5b21b6" font-family="var(--mono)">→ burger-chef:80</text>
+          <text x="253" y="312" text-anchor="middle" font-size="11" fill="#7c3aed">由 traefik 控制器执行</text>
+        </g>
+        <g class="node" data-k="service">
+          <rect class="box" x="398" y="196" width="150" height="128" rx="10" fill="#fff6e8" stroke="var(--c-service)" stroke-width="2"/>
+          <text x="473" y="228" text-anchor="middle" font-size="17" font-weight="700" fill="var(--c-service)">Service</text>
+          <text x="473" y="252" text-anchor="middle" font-size="12" fill="#9a5a06" font-family="var(--mono)">burger-chef</text>
+          <text x="473" y="272" text-anchor="middle" font-size="12" fill="#9a5a06">固定地址 ClusterIP</text>
+          <text x="473" y="292" text-anchor="middle" font-size="12" fill="#9a5a06" font-family="var(--mono)">selector:</text>
+          <text x="473" y="310" text-anchor="middle" font-size="12" fill="#9a5a06" font-family="var(--mono)">app=burger-chef</text>
+        </g>
+        <g class="node" data-k="workload">
+          <rect class="box" x="596" y="62" width="372" height="362" rx="14" fill="#f3f8ff" stroke="var(--c-workload)" stroke-width="2" stroke-dasharray="8 5"/>
+          <text x="614" y="88" font-size="15" font-weight="700" fill="var(--c-workload)">工作负载 Deployment: burger-chef</text>
+          <text x="614" y="108" font-size="12" fill="#1e4f96">期望 replicas=2 · 自动补齐 · 滚动更新 · 回滚</text>
+        </g>
+        <g class="node" data-k="pod">
+          <rect class="box" x="618" y="124" width="328" height="128" rx="10" fill="#ecfbf1" stroke="var(--c-pod)" stroke-width="2"/>
+          <text x="634" y="148" font-size="14" font-weight="700" fill="var(--c-pod)">Pod #1</text>
+          <text x="700" y="148" font-size="12" fill="#166534" font-family="var(--mono)">labels: app=burger-chef · IP 10.42.0.12</text>
+          <rect x="634" y="162" width="296" height="40" rx="7" fill="#fff" stroke="#86efac"/>
+          <text x="646" y="187" font-size="13" fill="#14532d">📦 容器 chef-robot · 镜像 burger:v1</text>
+          <text x="634" y="230" font-size="12" fill="#166534">同一个 Pod 内的容器共享：网络（localhost）+ 存储卷</text>
+        </g>
+        <g class="node" data-k="pod">
+          <rect class="box" x="618" y="276" width="328" height="128" rx="10" fill="#ecfbf1" stroke="var(--c-pod)" stroke-width="2"/>
+          <text x="634" y="300" font-size="14" font-weight="700" fill="var(--c-pod)">Pod #2</text>
+          <text x="700" y="300" font-size="12" fill="#166534" font-family="var(--mono)">labels: app=burger-chef · IP 10.42.0.13</text>
+          <rect x="634" y="314" width="296" height="40" rx="7" fill="#fff" stroke="#86efac"/>
+          <text x="646" y="339" font-size="13" fill="#14532d">📦 容器 chef-robot · 镜像 burger:v1</text>
+          <text x="634" y="382" font-size="12" fill="#166534">Pod 会死会换 IP —— 所以前面要有 Service</text>
+        </g>
+        <g class="node" data-k="registry">
+          <rect class="box" x="600" y="476" width="364" height="70" rx="12" fill="#fdf0f6" stroke="var(--c-registry)" stroke-width="2"/>
+          <text x="782" y="505" text-anchor="middle" font-size="16" font-weight="700" fill="var(--c-registry)">镜像仓库 Registry</text>
+          <text x="782" y="528" text-anchor="middle" font-size="12" fill="#9d174d" font-family="var(--mono)">localhost:5001/burger:v1, v2 ｜ TKE: TCR</text>
+        </g>
+        <g class="node" data-k="user">
+          <circle class="box" cx="62" cy="260" r="40" fill="#fff" stroke="#64748b" stroke-width="2"/>
+          <text x="62" y="256" text-anchor="middle" font-size="22">🧑‍💻</text>
+          <text x="62" y="282" text-anchor="middle" font-size="12" fill="#475569">浏览器</text>
+        </g>
+        <g stroke="#64748b" stroke-width="2" fill="none">
+          <path d="M102,260 L164,260" marker-end="url(#arr)"/>
+          <path d="M340,260 L396,260" marker-end="url(#arr)"/>
+          <path d="M548,248 C580,248 590,190 616,190" marker-end="url(#arr)"/>
+          <path d="M548,272 C580,272 590,340 616,340" marker-end="url(#arr)"/>
+          <path d="M782,474 L782,428" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+        </g>
+        <text x="792" y="458" font-size="12" fill="#9d174d">节点拉取镜像</text>
+        <text x="106" y="250" font-size="11" fill="#64748b">HTTP</text>
+        <circle id="dot" r="9" fill="#ef4444" opacity="0">
+          <animateMotion id="mv1" dur="2.4s" begin="indefinite" fill="freeze" path="M62,260 L253,260 L473,260 C580,260 590,190 700,190"/>
+          <animateMotion id="mv2" dur="2.4s" begin="indefinite" fill="freeze" path="M62,260 L253,260 L473,260 C580,260 590,340 700,340"/>
+        </circle>
+      </svg>
+      <div class="toolbar">
+        <button class="btn" id="sendReq">▶ 模拟一次请求</button>
+        <button class="btn ghost" id="clearSel">取消高亮</button>
+        <span id="reqLog" class="mono" style="align-self:center;color:var(--muted)"></span>
+      </div>
+    </div>
+    <div class="card detail" id="detail"></div>
+  </div>
+</section>
+
+<section id="concepts">
+  <h2>② 七个概念，一句话 + 一个比喻</h2>
+  <p class="lead">「定义」来自你的 TKE 课件；比喻用汉堡店串起来。点卡片会在全景图里高亮。</p>
+  <div class="grid" id="conceptGrid"></div>
+</section>
+
+<section id="flow">
+  <h2>③ TKE 使用流程 ↔ 本机怎么对应</h2>
+  <p class="lead">上排是课件里的 TKE 流程，下排是你在本机 colima 上做同一件事的方式。</p>
+  <div class="card"><div class="flow" id="flowBox"></div></div>
+</section>
+
+<section id="lab">
+  <h2>④ 动手实践：开一家汉堡店（逐行讲解版）</h2>
+  <p class="lead">每一行命令、每一行 YAML 都有解释。<b>把鼠标放到任意一行上</b>，右边会告诉你这行做了什么、每个参数什么意思、背后发生了什么，并在「集群状态图」里高亮它影响的对象。<b>点一下</b>可以固定住，方便边看边对照，再点一次取消。</p>
+  <div class="card howto">
+    <b>左侧色条 = 这行会不会改变东西：</b>
+    <span class="lg"><i style="background:var(--fx-create)"></i>新建</span>
+    <span class="lg"><i style="background:var(--fx-modify)"></i>修改</span>
+    <span class="lg"><i style="background:var(--fx-delete)"></i>删除</span>
+    <span class="lg"><i style="background:var(--fx-read)"></i>只读查看</span>
+    <span class="lg"><i style="background:var(--fx-local)"></i>只在本机</span>
+    <span class="lg"><i style="background:var(--fx-field)"></i>YAML 字段</span>
+    <span style="color:var(--muted)">｜ 验证状态：</span>
+    <span class="badge ok">✅ 已在本机验证</span><span class="badge part">◐ 部分验证</span><span class="badge warn">⚠ 未在本机验证</span>
+  </div>
+  <div class="progress"><span id="progTxt" class="mono">0 / 0</span><div class="bar"><i id="progBar"></i></div><button class="btn ghost" id="resetProg">重置进度</button></div>
+  <div class="lab-grid">
+    <div id="steps"></div>
+    <aside class="panel" id="panel">
+      <div class="card dg-card">
+        <div class="panel-h"><b>集群状态图</b><span>悬停命令看变化</span><button class="btn ghost" id="togglePanel" style="padding:2px 10px;font-size:12px">收起</button></div>
+        <div class="dg" id="dg">
+          <div class="zone"><div class="zt">💻 你的 Mac</div>
+            <div class="rw"><div class="bx" data-id="kubectl">kubectl</div><div class="bx" data-id="kubeconfig">~/.kube/config</div><div class="bx" data-id="files">~/k8s-lab 文件</div><div class="bx" data-id="helm-cli">helm</div><div class="bx" data-id="browser">浏览器 / curl</div></div>
+          </div>
+          <div class="zone"><div class="zt">🐳 Docker（跑在 colima 虚拟机里）</div>
+            <div class="rw"><div class="bx" data-id="images">本地镜像 burger:v1 / v2</div><i>push→</i><div class="bx" data-id="registry">镜像仓库 localhost:5001</div></div>
+          </div>
+          <div class="zone"><div class="zt">☸️ 集群 colima（k3s v1.34.1）</div>
+            <div class="rw"><div class="bx" data-id="apiserver">API Server + 数据库</div><div class="bx" data-id="node">节点 colima</div><div class="bx" data-id="kube-system">kube-system 系统组件</div></div>
+            <div class="ns bx" data-id="ns-burger"><div class="zt">命名空间 burger-shop</div>
+              <div class="rw"><div class="bx pod" data-id="pod-duo">Pod burger-duo
+                <div class="rw"><span class="bx sm" data-id="c-chef">容器 chef</span><span class="bx sm" data-id="vol-shared">共享卷 /data</span><span class="bx sm" data-id="c-helper">容器 helper</span></div></div></div>
+              <div class="rw"><div class="bx" data-id="deploy">Deployment burger-chef</div><i>→</i><div class="bx" data-id="rs">ReplicaSet</div><i>→</i><div class="bx" data-id="pods">Pod × 2</div></div>
+              <div class="rw"><div class="bx" data-id="ingress">Ingress</div><i>→</i><div class="bx" data-id="svc">Service burger-chef</div><div class="bx" data-id="fries">Deployment fries</div></div>
+            </div>
+            <div class="ns bx" data-id="ns-traefik"><div class="zt">命名空间 traefik</div>
+              <div class="rw"><div class="bx" data-id="traefik">traefik（Helm 装的 Ingress 控制器）</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card explain" id="explain"></div>
+    </aside>
+  </div>
+</section>
+
+<section id="pits">
+  <h2>⑤ 常见坑（看到这些报错先来这里查）</h2>
+  <div class="card" id="pitBox"></div>
+</section>
+</main>
+
+<script>
+/* ================= ①②③ 概念部分 ================= */
+const C = {
+  cluster:  {name:"集群", en:"Cluster", color:"var(--c-cluster)",
+    def:"是指容器运行所需云资源的集合，包含了若干台云服务器、负载均衡器等云资源。",
+    analogy:"整栋汉堡店大楼：灶台（节点）、水电、门口的路牌都算在内。",
+    points:["由「控制面」（大脑：API Server、调度器）+「节点」（干活的机器）组成","你所有的 kubectl 命令都是在对集群的 API Server 说话","TKE 里一台节点 = 一台 CVM；本机只有一台节点叫 colima"],
+    cmd:"kubectl get nodes -o wide", local:"colima 虚拟机里的 k3s v1.34.1"},
+  pod:      {name:"实例（Pod）", en:"Pod", color:"var(--c-pod)",
+    def:"由相关的一个或多个容器构成一个实例，这些容器共享相同的存储和网络空间。",
+    analogy:"一个工位：主厨 + 帮厨共用同一张台面（存储）和同一部内线电话（localhost）。",
+    points:["K8s 调度的最小单位是 Pod，不是容器","同一 Pod 内容器用 localhost 互访，可挂同一个 Volume","Pod 是「消耗品」：会被删除重建，IP 会变"],
+    cmd:"kubectl -n burger-shop get pods -o wide", local:"实践第 3 步的 burger-duo"},
+  workload: {name:"工作负载", en:"Workload · Deployment", color:"var(--c-workload)",
+    def:"Kubernetes 资源对象，用于管理 Pod 副本的创建、调度以及整个生命周期的自动控制。",
+    analogy:"流水线领班：你只说「保持 2 个厨师在岗」，他负责招人、补人、换代。",
+    points:["你声明「期望状态」，控制器不断把「实际状态」拉过去","通过 selector 认领带对应 labels 的 Pod（就是你遇到的那个报错）","常见类型：Deployment（无状态）、StatefulSet（有状态）、DaemonSet（每节点一个）、Job/CronJob（一次性/定时）"],
+    cmd:"kubectl -n burger-shop get deploy,rs,pods", local:"burger.yaml 里的 burger-chef"},
+  service:  {name:"Service", en:"Service", color:"var(--c-service)",
+    def:"由多个相同配置的实例（Pod）和访问这些实例（Pod）的规则组成的微服务。",
+    analogy:"前台点餐窗口：号码固定不变，后面哪个厨师接单由它分配。",
+    points:["给一组 Pod 一个稳定的名字 + IP（ClusterIP），集群内用 burger-chef 这个名字就能访问","靠 selector 匹配 Pod 的 labels，自动维护后端列表（EndpointSlice）","类型：ClusterIP（集群内）、NodePort（节点端口）、LoadBalancer（TKE 会自动建 CLB）"],
+    cmd:"kubectl -n burger-shop get svc,endpointslice", local:"burger.yaml 里的 Service burger-chef"},
+  ingress:  {name:"Ingress", en:"Ingress", color:"var(--c-ingress)",
+    def:"Ingress 是用于将外部 HTTP（S）流量路由到服务（Service）的规则集合。",
+    analogy:"商场大门的导购牌：「/burger 往左，/fries 往右」，按域名和路径把客人领到对应窗口。",
+    points:["Ingress 只是「规则」，必须有 Ingress Controller（traefik / nginx / TKE 的 CLB）来执行","一个入口按 host / path 分发到多个 Service，省 IP 省 LB","HTTPS 证书一般挂在 Ingress 上"],
+    cmd:"kubectl -n burger-shop get ingress", local:"colima 默认禁用了 traefik，实践第 6 步用 Helm 装"},
+  helm:     {name:"Helm 应用", en:"Helm Chart / Release", color:"var(--c-helm)",
+    def:"Helm 是管理 Kubernetes 应用程序的打包工具，提供了 Helm Chart 在指定集群内图形化的增删改查。",
+    analogy:"预制套餐包：一份菜谱包（Chart）里写好了 Deployment + Service + 配置，一键下单（install），一键换套餐（upgrade）。",
+    points:["Chart = 一堆 YAML 模板 + values.yaml 参数","Release = Chart 在集群里的一次安装实例，有版本可回滚","TKE 控制台的「Helm 应用」就是图形化的 helm install / upgrade / uninstall"],
+    cmd:"helm list -A", local:"实践第 6 步：helm install traefik"},
+  registry: {name:"镜像仓库", en:"Image Registry", color:"var(--c-registry)",
+    def:"用于存放 Docker 镜像，Docker 镜像用于部署容器服务。",
+    analogy:"机器人芯片仓库：每个版本的「大脑芯片」（镜像 burger:v1、v2）都存在这里，厨师上岗前去领。",
+    points:["镜像地址 = 仓库地址/名字:标签，如 localhost:5001/burger:v1","节点拉不到镜像 → Pod 卡在 ImagePullBackOff","TKE 用 TCR；你平时用的 csighub.tencentyun.com 也是一个镜像仓库"],
+    cmd:"curl -s localhost:5001/v2/burger/tags/list", local:"本机 docker 里跑的 registry:2（端口 5001）"},
+  user:     {name:"用户 / 浏览器", en:"Client", color:"#475569",
+    def:"集群外部的访问者。",
+    analogy:"来买汉堡的客人，只认识商场大门（Ingress），不关心后厨有几个厨师。",
+    points:["外部流量：用户 → Ingress → Service → Pod","集群内部调用可以直接走 Service 名字，不经过 Ingress","本机实验用 kubectl port-forward 代替真实公网入口"],
+    cmd:"curl -H 'Host: burger.local' localhost:8000/whoami", local:"你的终端 / 浏览器"},
+};
+const detail = document.getElementById('detail');
+const svg = document.getElementById('archSvg');
+function show(k){
+  const c = C[k]; if(!c) return;
+  svg.classList.add('dim');
+  svg.querySelectorAll('.node').forEach(n=>n.classList.toggle('active', n.dataset.k===k));
+  detail.innerHTML = `<h3 style="color:${c.color}">${c.name}</h3><div class="en">${c.en}</div>
+    <div class="quote"><b>定义：</b>${c.def}</div><p style="margin:8px 0">🍔 <b>比喻：</b>${c.analogy}</p>
+    <ul>${c.points.map(p=>`<li>${p}</li>`).join('')}</ul>
+    <div class="meta"><b>看一眼</b><code>${c.cmd}</code></div><div class="meta" style="margin-top:4px"><b>本机</b>${c.local}</div>`;
+}
+function clearSel(){
+  svg.classList.remove('dim');
+  svg.querySelectorAll('.node').forEach(n=>n.classList.remove('active'));
+  detail.innerHTML = `<h3>点图里的方块 👈</h3><p class="lead" style="margin-top:6px">从外到内读这张图：</p>
+    <ol style="padding-left:18px;margin:0"><li><b>镜像仓库</b>存着做好的「芯片」（镜像）</li><li><b>工作负载</b>按镜像造出若干个 <b>Pod</b>，并保证数量</li>
+    <li><b>Service</b> 给这组 Pod 一个固定入口，做负载均衡</li><li><b>Ingress</b> 把外部 HTTP 按域名/路径转给 Service</li>
+    <li><b>Helm</b> 把上面一堆 YAML 打成包，一键安装</li><li>这一切都跑在一个<b>集群</b>里</li></ol>`;
+}
+svg.querySelectorAll('.node').forEach(n=>n.addEventListener('click',e=>{e.stopPropagation();show(n.dataset.k)}));
+document.getElementById('clearSel').onclick = clearSel;
+clearSel();
+let flip = false;
+document.getElementById('sendReq').onclick = ()=>{
+  const dot = document.getElementById('dot'); flip = !flip;
+  dot.setAttribute('opacity','1'); document.getElementById(flip?'mv1':'mv2').beginElement();
+  const log = document.getElementById('reqLog');
+  ["GET burger.local/whoami","→ Ingress 匹配 host","→ Service 选一个 Pod",`→ Pod #${flip?1:2} 返回 version=v1`].forEach((s,i)=>setTimeout(()=>log.textContent=s, i*600));
+};
+const grid = document.getElementById('conceptGrid');
+["cluster","pod","workload","service","ingress","helm","registry"].forEach(k=>{
+  const c=C[k]; const d=document.createElement('div');
+  d.className='card concept'; d.style.setProperty('--c',c.color);
+  d.innerHTML=`<h4>${c.name}<span class="tag">${c.en.split(' ')[0]}</span></h4><div style="font-size:13px;margin-top:6px">${c.def}</div><p class="analogy">🍔 ${c.analogy}</p>`;
+  d.onclick=()=>{show(k);document.getElementById('map').scrollIntoView({behavior:'smooth'})};
+  grid.appendChild(d);
+});
+const flow = [
+  {t:"注册账号并登录 TKE", subs:[], local:"安装 <b>colima</b> + <b>kubectl</b>（你已装好）"},
+  {t:"角色授权", subs:[], local:"<b>kubeconfig</b> 决定你是谁、连哪个集群；RBAC 决定能做什么：<code>kubectl auth can-i '*' '*'</code>"},
+  {t:"创建集群", subs:["自定义创建","模板创建"], local:"<code>colima start --kubernetes --kubernetes-version v1.34.1+k3s1</code>"},
+  {t:"部署工作负载", subs:["镜像部署","YAML 部署"], local:"镜像部署：<code>kubectl create deployment</code><br>YAML 部署：<code>kubectl apply -f burger.yaml</code>"},
+  {t:"生命周期管理", subs:[], local:"<code>scale</code> 扩缩 · <code>set image</code> 升级 · <code>rollout undo</code> 回滚 · <code>delete</code> 下线"},
+];
+document.getElementById('flowBox').innerHTML = flow.map(f=>`<div class="step-col"><div class="fbox">${f.t}</div>${f.subs.map(s=>`<div class="fsub">${s}</div>`).join('')}<div class="row-label">本机对应 ↓</div><div class="local">${f.local}</div></div>`).join('');
+
+/* ================= ④ 逐行讲解 ================= */
+const esc = s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const R = String.raw;
+
+const BOX = {
+  kubectl:'kubectl：你和集群对话的命令行工具，所有命令都发给 API Server',
+  kubeconfig:'~/.kube/config：记录「连哪个集群、用什么身份」，kubectl 每次都先读它',
+  files:'~/k8s-lab：存放 Dockerfile 和 YAML 文件的本地目录，写文件不会影响集群',
+  'helm-cli':'helm：K8s 的「应用商店客户端」，一条命令装好一整套资源',
+  browser:'你的浏览器或 curl：模拟集群外部的用户',
+  images:'本地镜像：docker build 出来的镜像，先存在本机 Docker 里',
+  registry:'镜像仓库 localhost:5001：集群节点从这里拉镜像（TKE 上对应 TCR）',
+  apiserver:'API Server + 数据库：集群唯一入口。所有对象都存进数据库，控制器盯着数据库干活',
+  node:'节点 colima：真正运行容器的机器，上面的 kubelet 负责拉镜像、起容器',
+  'kube-system':'kube-system：系统组件（CoreDNS 域名解析、存储、监控）住的命名空间',
+  'ns-burger':'命名空间 burger-shop：实验用的「楼层」，删掉它里面的东西会全部删除',
+  'pod-duo':'Pod burger-duo：一个 Pod 里两个容器，用来观察共享网络和存储',
+  'c-chef':'容器 chef：nginx，提供 /whoami 接口',
+  'c-helper':'容器 helper：busybox 小工具箱，用来在集群内部发请求',
+  'vol-shared':'共享卷 /data：emptyDir 类型，两个容器挂在同一个目录',
+  deploy:'Deployment burger-chef：领班，负责版本和数量',
+  rs:'ReplicaSet：Deployment 自动创建的「班组」，负责保持 Pod 数量；每个版本一个',
+  pods:'Pod × 2：真正干活的厨师，带标签 app=burger-chef',
+  svc:'Service burger-chef：固定入口，按标签把请求分给 Pod',
+  ingress:'Ingress：七层路由规则，按域名/路径把外部请求转给 Service',
+  fries:'Deployment fries：用「镜像部署」命令式创建的另一个工作负载',
+  'ns-traefik':'命名空间 traefik：Helm 装 traefik 时创建',
+  traefik:'traefik：Ingress 控制器，真正执行 Ingress 规则的反向代理',
+};
+const NAME = {kubectl:'kubectl',kubeconfig:'kubeconfig',files:'本地文件',  'helm-cli':'helm',browser:'浏览器/curl',images:'本地镜像',registry:'镜像仓库',apiserver:'API Server',node:'节点',
+  'kube-system':'kube-system','ns-burger':'命名空间 burger-shop','pod-duo':'Pod burger-duo','c-chef':'容器 chef','c-helper':'容器 helper','vol-shared':'共享卷',deploy:'Deployment',rs:'ReplicaSet',
+  pods:'Pod×2',svc:'Service',ingress:'Ingress',fries:'Deployment fries','ns-traefik':'命名空间 traefik',traefik:'traefik'};
+const FX = {create:['新建','🟢 新建资源'],modify:['修改','🟠 修改资源'],read:['查看','🔵 只读查看，不改变任何东西'],delete:['删除','🔴 删除资源'],local:['本机','⚪ 只在本机操作，不碰集群'],field:['定义','🟣 YAML 字段：写进文件，apply 之后才生效'],comment:['注释','💬 注释，不会执行'],use:['参与','⚙️ 参与处理，自身不变']};
+const parseT = s=>{ const [id,fx]=s.split(':'); return {id, fx}; };
+
+/* ---- 常用命令（多处复用）---- */
+const execWhoami = ()=>({c:'kubectl -n burger-shop exec burger-duo -c helper -- wget -qO- burger-chef/whoami', fx:'read', t:['c-helper','svc','pods'],
+  d:'在 helper 容器里访问 Service 名字 burger-chef，看是哪个 Pod、哪个版本在回应。',
+  args:[['exec burger-duo','在 Pod burger-duo 里执行命令'],['-c helper','指定 helper 容器（Pod 里有多个容器时必须指定）'],['--','分隔符：后面是要在容器里运行的命令'],['wget -qO- URL','静默请求 URL 并把内容打印出来']],
+  flow:['helper 容器把 burger-chef 交给 CoreDNS 解析，得到 Service 的固定 IP','请求发到 Service IP，iptables 规则随机选一个 Pod','被选中的 Pod 里的 nginx 返回 version 和自己的 Pod 名'],
+  out:'version=v1 pod=burger-chef-6fdbfddc44-mrcp8'});
+const rolloutStatus = ()=>({c:'kubectl -n burger-shop rollout status deploy/burger-chef', fx:'read', t:['deploy','rs','pods'],
+  d:'盯着这次发布，直到所有新 Pod 都就绪才返回。发布卡住时它会一直等。', out:'deployment "burger-chef" successfully rolled out'});
+const heredoc = (file, kind, t)=>({c:`cat > ${file} <<'EOF'`, fx:'local', t:['files'], heredoc:kind,
+  d:`把接下来到 EOF 为止的内容原样写进 ${file}。这一步只是在本机写文件，集群还什么都不知道，要等后面 kubectl apply 才会生效。`,
+  args:[['cat > 文件','把输入内容写进文件（覆盖）'],["<<'EOF'","heredoc：从下一行开始一直读到单独一行 EOF 为止；加引号表示里面的 $ 变量不展开"]]});
+
+/* ---- 步骤数据 ---- */
+const chipOf = k=>`<span class="chip" style="background:${C[k].color}">${C[k].name}</span>`;
+const S = [
+ {t:"环境检查：我连的是哪个集群？", tags:["cluster"], v:"ok",
+  why:"对应 TKE 的「登录 + 角色授权」。先确认 kubectl 能连上集群、连的是哪个集群、有没有权限。",
+  code:[["确认版本、上下文和权限",[
+    {c:'kubectl version', fx:'read', t:['kubectl','apiserver'],
+     d:'同时打印 kubectl（客户端）和集群（服务端）的版本。能打印出 Server Version，说明 kubectl 能连上集群。',
+     flow:['kubectl 读取 ~/.kube/config，找到集群地址和证书','向 API Server 发一个 GET /version 请求','把两边版本一起打印出来'],
+     out:'Client Version: v1.34.1\nServer Version: v1.34.1+k3s1', tip:'两边小版本差超过 1（如 1.37 对 1.33）会出现警告，这就是之前升级的原因。'},
+    {c:'kubectl config current-context', fx:'local', t:['kubeconfig'],
+     d:'只读本地的 ~/.kube/config，打印当前用的是哪个「上下文」（集群 + 身份 + 默认命名空间）。不会访问集群。',
+     out:'colima', tip:'连多个集群（比如本机和 TKE）时，执行任何修改命令前都先看一眼这里，避免改错集群。'},
+    {c:"kubectl auth can-i '*' '*'", fx:'read', t:['apiserver'],
+     d:'问 API Server：「我能对所有资源做所有操作吗？」返回 yes 说明你是管理员。',
+     args:[["'*' '*'",'第一个是动作（get/create/delete…），第二个是资源类型；* 表示全部']],
+     out:'yes', tip:'这就是 RBAC 权限检查。在 TKE 上子账号权限不够时，这里会返回 no。'},
+  ]]],
+  expect:'Client Version: v1.34.1\nServer Version: v1.34.1+k3s1\ncolima\nyes'},
+
+ {t:"集群：看看大楼里有几台灶台", tags:["cluster"], v:"ok",
+  why:"对应「创建集群」。本机集群已经由 colima 建好，只有一个节点。再建一个命名空间，把实验资源隔离开。",
+  code:[["查看节点、系统组件，创建实验命名空间",[
+    {c:'kubectl get nodes -o wide', fx:'read', t:['node'],
+     d:'列出集群里所有节点（干活的机器）。-o wide 多显示 IP、操作系统、容器运行时等列。',
+     args:[['get nodes','列出 Node 资源'],['-o wide','输出更多列']],
+     out:'NAME     STATUS   ROLES                  VERSION        CONTAINER-RUNTIME\ncolima   Ready    control-plane,master   v1.34.1+k3s1   docker://28.4.0',
+     tip:'STATUS 必须是 Ready，节点才能接收新 Pod。'},
+    {c:'kubectl get pods -n kube-system', fx:'read', t:['kube-system'],
+     d:'看系统组件是否正常：coredns（域名解析）、local-path-provisioner（存储）、metrics-server（监控）。',
+     args:[['-n kube-system','指定命名空间；不写就是 default']]},
+    {c:'kubectl create namespace burger-shop', fx:'create', t:['ns-burger','apiserver:use'],
+     d:'新建一个叫 burger-shop 的命名空间（大楼里的一层楼）。之后所有实验资源都放这里，最后删掉它就能一键清理。',
+     flow:['kubectl 把「创建 Namespace」的请求发给 API Server','API Server 检查权限和名字是否合法','写进集群数据库，命名空间立刻可用'],
+     out:'namespace/burger-shop created', tip:'如果提示 AlreadyExists，说明之前已经建过，可以忽略。'},
+  ]]],
+  expect:'colima   Ready   control-plane,master   v1.34.1+k3s1\nnamespace/burger-shop created'},
+
+ {t:"镜像仓库：做两版「大脑芯片」并入库", tags:["registry"], v:"ok",
+  why:"先有镜像，才有容器。这里在本机跑一个私有镜像仓库，再构建 burger:v1 / v2 两个版本推进去。",
+  code:[
+   ["1) 启动本地镜像仓库",[
+    {c:'docker run -d --name registry --restart=always -p 5001:5000 registry:2', fx:'local', t:['registry'],
+     d:'用 Docker 启动一个官方的镜像仓库程序 registry:2。它不属于 K8s，是集群外的一个普通容器。',
+     args:[['-d','后台运行'],['--name registry','给容器起名 registry，之后 docker rm -f registry 就能删掉'],['--restart=always','Docker 重启后自动拉起'],['-p 5001:5000','把容器的 5000 端口映射到本机 5001（macOS 的 5000 常被 AirPlay 占用）'],['registry:2','要运行的镜像：Docker 官方仓库程序第 2 版']],
+     out:'e91201559f1c...（一串容器 ID）', tip:'提示 Conflict 说明已经在跑了，跳过即可。'},
+   ]],
+   ["2) 写 Dockerfile（造芯片的配方）",[
+    {c:'mkdir -p ~/k8s-lab && cd ~/k8s-lab', fx:'local', t:['files'],
+     d:'创建实验目录并进入。-p 表示目录已存在也不报错。&& 表示前一条成功才执行后一条。'},
+    heredoc('Dockerfile','docker'),
+    'FROM nginx:alpine',
+    'ARG VERSION=v1',
+    'RUN echo "<h1>Burger $VERSION</h1>" > /usr/share/nginx/html/index.html \\',
+    R` && printf 'server {\n  listen 80;\n  location / { root /usr/share/nginx/html; }\n  location /whoami { default_type text/plain; return 200 "version=%s pod=$hostname\\n"; }\n}\n' "$VERSION" > /etc/nginx/conf.d/default.conf`,
+    'EOF',
+   ]],
+   ["3) 构建并推送 v1、v2，查看仓库里的标签",[
+    {c:'for v in v1 v2; do', fx:'local', t:[], d:'shell 循环：下面两行会执行两遍，第一遍 $v=v1，第二遍 $v=v2。'},
+    {c:'  docker build -q --build-arg VERSION=$v -t localhost:5001/burger:$v .', fx:'local', t:['images','files:use'],
+     d:'按当前目录的 Dockerfile 构建镜像，并打上仓库地址作为名字。',
+     args:[['-q','安静模式，只输出镜像 ID'],['--build-arg VERSION=$v','把版本号传给 Dockerfile 里的 ARG VERSION'],['-t localhost:5001/burger:$v','镜像名 = 仓库地址/名字:标签；名字里带仓库地址，push 才知道推到哪'],['.','构建上下文：当前目录']],
+     flow:['读取 Dockerfile','基于 nginx:alpine 一层层执行 ARG、RUN','生成新镜像，存在本机 Docker 里（还没进仓库）']},
+    {c:'  docker push -q localhost:5001/burger:$v', fx:'local', t:['images:use','registry'],
+     d:'把本地镜像上传到镜像仓库。之后集群节点就能从仓库拉这个镜像了。',
+     out:'localhost:5001/burger:v1'},
+    {c:'done', fx:'local', t:[], d:'循环结束。'},
+    {c:'curl -s localhost:5001/v2/burger/tags/list', fx:'local', t:['registry'],
+     d:'调用镜像仓库的 HTTP API，列出 burger 这个镜像有哪些标签，确认两版都推上去了。',
+     args:[['-s','静默，不显示进度条'],['/v2/burger/tags/list','Docker Registry 标准 API：列出某个镜像的全部标签']],
+     out:'{"name":"burger","tags":["v2","v1"]}'},
+   ]]],
+  expect:'{"name":"burger","tags":["v2","v1"]}'},
+
+ {t:"Pod：一个工位里的两个容器", tags:["pod"], v:"ok",
+  why:"验证课件那句「容器共享相同的存储和网络空间」：helper 用 localhost 访问 chef 的 nginx，chef 能读到 helper 写进共享卷的文件。",
+  code:[
+   ["1) 写 pod-duo.yaml 并创建",[
+    heredoc('~/k8s-lab/pod-duo.yaml','yaml'),
+    'apiVersion: v1','kind: Pod','metadata:','  name: burger-duo','  namespace: burger-shop','spec:','  volumes:',
+    '  - name: shared              # 共享台面','    emptyDir: {}','  containers:',
+    '  - name: chef                # 主厨：nginx','    image: localhost:5001/burger:v1','    volumeMounts:','    - name: shared','      mountPath: /data',
+    '  - name: helper              # 帮厨：busybox','    image: rancher/mirrored-library-busybox:1.36.1',
+    `    command: ["sh", "-c", "echo 'sauce ready' > /data/note.txt; sleep 3600"]`,
+    '    volumeMounts:','    - name: shared','      mountPath: /data',
+    'EOF',
+    {c:'kubectl apply -f ~/k8s-lab/pod-duo.yaml', fx:'create', t:['pod-duo','c-chef','c-helper','vol-shared','apiserver:use','node:use','registry:use'],
+     d:'把 YAML 文件交给集群：「请帮我创建这个 Pod」。apply 是声明式的：不存在就创建，存在就按文件更新。',
+     args:[['apply','声明式创建/更新'],['-f 文件','从文件读取资源定义']],
+     flow:['kubectl 读取文件，发给 API Server','API Server 校验字段，存进数据库（此时 Pod 状态是 Pending）','调度器给 Pod 选一个节点（这里只有 colima）','节点上的 kubelet 从镜像仓库拉镜像','先启动一个 pause 容器占住网络，再启动 chef 和 helper，并挂上共享卷'],
+     out:'pod/burger-duo created'},
+    {c:'kubectl -n burger-shop wait --for=condition=Ready pod/burger-duo --timeout=120s', fx:'read', t:['pod-duo'],
+     d:'等待 Pod 变成 Ready 再返回，最多等 120 秒。拉镜像需要时间，等它就绪再做下一步。',
+     args:[['--for=condition=Ready','等到 Pod 的 Ready 条件为真'],['pod/burger-duo','类型/名字'],['--timeout=120s','超时时间']],
+     out:'pod/burger-duo condition met'},
+   ]],
+   ["2) 验证共享网络 & 共享存储",[
+    '# helper 用 localhost 访问 chef 的 80 端口 → 共享网络',
+    {c:'kubectl -n burger-shop exec burger-duo -c helper -- wget -qO- localhost/whoami', fx:'read', t:['c-helper','c-chef'],
+     d:'在 helper 容器里访问 localhost。helper 自己并没有运行 nginx，却能拿到 chef 的响应，因为同一个 Pod 里的容器共用一个网络空间。',
+     args:[['-c helper','在 helper 容器里执行'],['localhost/whoami','访问本 Pod 的 80 端口']],
+     flow:['helper 容器发请求到 127.0.0.1:80','同一 Pod 共享 pause 容器的网络命名空间','chef 里的 nginx 收到请求并回应'],
+     out:'version=v1 pod=burger-duo'},
+    '# chef 读取 helper 写的文件 → 共享存储',
+    {c:'kubectl -n burger-shop exec burger-duo -c chef -- cat /data/note.txt', fx:'read', t:['c-chef','vol-shared'],
+     d:'在 chef 容器里读 /data/note.txt。这个文件是 helper 启动时写的，chef 能读到，因为两个容器挂的是同一个 emptyDir 卷。',
+     out:'sauce ready'},
+   ]]],
+  expect:'version=v1 pod=burger-duo\nsauce ready'},
+
+ {t:"工作负载：两种部署方式 + 自愈", tags:["workload","pod"], v:"part",
+  why:"对应「部署工作负载」的「YAML 部署 / 镜像部署」。YAML 部署就是你一开始那份 burger.yaml，补上 selector 和 labels。然后删掉一个 Pod，看领班自动补人。",
+  code:[
+   ["1) YAML 部署：Deployment + Service 写在一个文件里（✅ 已验证）",[
+    heredoc('~/k8s-lab/burger.yaml','yaml'),
+    'apiVersion: apps/v1','kind: Deployment','metadata:','  name: burger-chef','  namespace: burger-shop','spec:','  replicas: 2',
+    '  selector:','    matchLabels:','      app: burger-chef        # 领班认这个工牌',
+    '  template:','    metadata:','      labels:','        app: burger-chef      # 厨师胸前的工牌',
+    '    spec:','      containers:','      - name: chef-robot','        image: localhost:5001/burger:v1','        ports:','        - containerPort: 80',
+    '---',
+    'apiVersion: v1','kind: Service','metadata:','  name: burger-chef','  namespace: burger-shop','spec:',
+    '  selector:','    app: burger-chef          # 前台把单子派给带这个工牌的厨师','  ports:','  - port: 80','    targetPort: 80',
+    'EOF',
+    {c:'kubectl apply -f ~/k8s-lab/burger.yaml', fx:'create', t:['deploy','rs','pods','svc','apiserver:use','registry:use'],
+     d:'一次创建两个对象：Deployment burger-chef 和 Service burger-chef。之后的连锁反应全是控制器自动完成的。',
+     flow:['API Server 把 Deployment 和 Service 存进数据库','Deployment 控制器发现新 Deployment，创建一个 ReplicaSet','ReplicaSet 控制器发现需要 2 个 Pod，创建 2 个 Pod','调度器分配节点，kubelet 拉镜像、启动容器','EndpointSlice 控制器把就绪 Pod 的 IP 填进 Service 的后端列表'],
+     out:'deployment.apps/burger-chef created\nservice/burger-chef created'},
+    {c:'kubectl -n burger-shop get deploy,rs,pods -l app=burger-chef', fx:'read', t:['deploy','rs','pods'],
+     d:'一次看三层：Deployment → ReplicaSet → Pod。注意 Pod 名字 = ReplicaSet 名字 + 随机后缀。',
+     args:[['deploy,rs,pods','逗号分隔，一次查多种资源'],['-l app=burger-chef','只看带这个标签的（label selector）']],
+     out:'deployment.apps/burger-chef   2/2   2   2\nreplicaset.apps/burger-chef-6fdbfddc44   2   2   2\npod/burger-chef-6fdbfddc44-dgtnb   1/1   Running\npod/burger-chef-6fdbfddc44-mrcp8   1/1   Running'},
+   ]],
+   ["2) 镜像部署：一条命令（相当于 TKE 控制台填个镜像地址）",[
+    {c:'kubectl -n burger-shop create deployment fries --image=localhost:5001/burger:v1', fx:'create', t:['fries','apiserver:use'],
+     d:'命令式创建：不用写 YAML，kubectl 帮你生成一个 Deployment，标签自动设为 app=fries。适合临时试验，正式环境推荐 YAML（可以存进 Git）。',
+     args:[['create deployment fries','创建名为 fries 的 Deployment'],['--image=…','用哪个镜像']],
+     out:'deployment.apps/fries created', tip:'想看它生成了什么 YAML：kubectl -n burger-shop get deploy fries -o yaml'},
+    {c:'kubectl -n burger-shop get deploy fries', fx:'read', t:['fries'], d:'查看 fries 是否就绪，READY 显示 1/1 即可。', out:'fries   1/1   1   1'},
+   ]],
+   ["3) 自愈：另开一个终端先 watch，再删一个 Pod",[
+    '# 终端 A',
+    {c:'kubectl -n burger-shop get pods -l app=burger-chef -w', fx:'read', t:['pods'],
+     d:'持续监听 Pod 的变化，有新事件就打印一行。按 Ctrl+C 退出。',
+     args:[['-w','watch：不退出，持续输出变化']]},
+    '# 终端 B',
+    {c:'kubectl -n burger-shop delete $(kubectl -n burger-shop get pod -l app=burger-chef -o name | head -1)', fx:'delete', t:['pods','rs:use'],
+     d:'删掉 burger-chef 的第一个 Pod，模拟「一个厨师突然离岗」。',
+     args:[['$( … )','先执行括号里的命令，把结果当作参数'],['-o name','只输出 pod/xxx 这样的名字'],['| head -1','只取第一行']],
+     flow:['被删的 Pod 进入 Terminating','ReplicaSet 控制器发现实际只剩 1 个，期望是 2 个','立刻创建一个新 Pod（名字后缀不同）','几秒后新 Pod Running，总数恢复为 2'],
+     out:'pod "burger-chef-6fdbfddc44-dgtnb" deleted', tip:'这就是「声明式」：你声明要 2 个，控制器负责一直保持 2 个。'},
+   ]]],
+  expect:'deployment.apps/burger-chef   2/2   2   2\n# 自愈：被删的 Pod Terminating，几秒内出现一个新名字的 Pod 变成 Running',
+  note:"注意 Deployment → ReplicaSet → Pod 三层：Deployment 管版本，ReplicaSet 管数量，Pod 干活。"},
+
+ {t:"Service：固定的点餐窗口 + 负载均衡", tags:["service"], v:"part",
+  why:"Pod 的 IP 会变，Service 的名字不变。在集群内用 burger-chef 这个名字访问，多请求几次能看到落在不同 Pod 上。",
+  code:[
+   ["1) 看 Service 和它自动维护的后端列表（✅ 已验证）",[
+    {c:'kubectl -n burger-shop get svc burger-chef', fx:'read', t:['svc'],
+     d:'看 Service 的类型和 CLUSTER-IP。这个 IP 在 Service 的整个生命周期里都不会变。',
+     out:'NAME          TYPE        CLUSTER-IP     PORT(S)\nburger-chef   ClusterIP   10.43.206.59   80/TCP'},
+    {c:'kubectl -n burger-shop get endpointslice -l kubernetes.io/service-name=burger-chef', fx:'read', t:['svc','pods'],
+     d:'EndpointSlice = Service 当前的后端名单，里面是所有匹配标签且已就绪的 Pod IP。Service 访问不通时第一个看它。',
+     out:'NAME                ADDRESSTYPE   PORTS   ENDPOINTS\nburger-chef-kjgpg   IPv4          80      10.42.0.12,10.42.0.13', tip:'ENDPOINTS 为空 = selector 和 Pod 标签对不上，或者 Pod 没就绪。'},
+   ]],
+   ["2) 集群内通过 Service 名字访问（借用 burger-duo 的 helper 容器，✅ 已验证）",[
+    {c:'for i in 1 2 3 4; do', fx:'local', t:[], d:'循环 4 次，看请求是不是被分到不同的 Pod。'},
+    Object.assign(execWhoami(), {c:'  kubectl -n burger-shop exec burger-duo -c helper -- wget -qO- burger-chef/whoami'}),
+    {c:'done', fx:'local', t:[], d:'循环结束。输出里的 pod= 会在两个名字之间随机出现。'},
+   ]],
+   ["3) 从 Mac 本机访问：port-forward 打个临时通道",[
+    {c:'kubectl -n burger-shop port-forward svc/burger-chef 8080:80', fx:'local', t:['kubectl','browser','svc','pods'],
+     d:'在本机 8080 端口和 Service 之间开一条临时隧道。命令会一直挂着，按 Ctrl+C 关闭隧道。只用于调试，不会修改集群。',
+     args:[['svc/burger-chef','转发到这个 Service（实际会选它后面的一个 Pod）'],['8080:80','本机端口:Service 端口']],
+     out:'Forwarding from 127.0.0.1:8080 -> 80'},
+    '# 另开终端或浏览器打开 http://localhost:8080',
+   ]]],
+  expect:'version=v1 pod=burger-chef-6fdbfddc44-mrcp8\nversion=v1 pod=burger-chef-6fdbfddc44-dgtnb\n…'},
+
+ {t:"Helm：一键安装 Ingress 控制器 traefik", tags:["helm","ingress"], v:"warn",
+  why:"Ingress 规则需要一个「执行者」。colima 默认用 --disable=traefik 关掉了 k3s 自带的 traefik，这里用 Helm 装一个，顺便体验 Chart 和 Release。",
+  code:[["安装 helm 并部署 traefik（需联网：traefik.github.io + docker.io）",[
+    {c:'brew install helm', fx:'local', t:['helm-cli'], d:'用 Homebrew 在 Mac 上安装 helm 命令行工具。'},
+    {c:'helm repo add traefik https://traefik.github.io/charts', fx:'local', t:['helm-cli'],
+     d:'登记一个 Chart 仓库，起名 traefik。只是写本地配置，还没下载任何东西。'},
+    {c:'helm repo update', fx:'local', t:['helm-cli'], d:'下载所有已登记仓库的最新索引（有哪些 Chart、哪些版本）。'},
+    {c:'helm upgrade --install traefik traefik/traefik -n traefik --create-namespace \\\n  --set service.spec.type=ClusterIP --wait --timeout 5m', fx:'create', t:['helm-cli:use','ns-traefik','traefik','apiserver:use'],
+     d:'把 traefik 这个 Chart 安装进集群，Release 名也叫 traefik。Helm 会把 Chart 里的模板渲染成一堆 YAML（Deployment、Service、RBAC、IngressClass…），再一次性提交给集群。',
+     args:[['upgrade --install','没装过就安装，装过（包括上次失败）就升级。重复执行也不会报「名字已被占用」'],['traefik（第一个）','Release 名：这次安装的名字'],['traefik/traefik','仓库名/Chart 名'],['-n traefik --create-namespace','装到 traefik 命名空间，不存在就创建'],['\\','行尾反斜杠：命令接到下一行'],['--set service.spec.type=ClusterIP','覆盖 Chart 的默认参数：Service 用 ClusterIP（本机实验不需要 LoadBalancer）。chart 42.x 的参数路径是 service.spec.type，旧写法 service.type 会被静默忽略'],['--wait --timeout 5m','等所有资源就绪才返回，最多等 5 分钟']],
+     tip:'第一次要从 docker.io 拉 traefik 镜像（约 50MB），可能要等一分钟左右，看起来像卡住了。不要按 Ctrl+C：中断后 Release 会留下 failed 记录，再执行 helm install 会报 cannot reuse a name that is still in use。另开一个终端执行 kubectl -n traefik get pods -w 看进度。',
+     flow:['helm 下载 traefik Chart（一组 YAML 模板 + 默认参数）','用 --set 的值渲染模板，得到最终 YAML','提交给 API Server，创建命名空间、Deployment、Service、IngressClass 等','在集群里记录一个 Release（版本 1），以后可以 upgrade / rollback'],
+     out:'NAME: traefik\nSTATUS: deployed\nREVISION: 1'},
+    {c:'helm list -A', fx:'read', t:['traefik'], d:'列出所有命名空间里的 Helm Release。-A = all namespaces。',
+     out:'NAME     NAMESPACE  REVISION  STATUS    CHART\ntraefik  traefik    1         deployed  traefik-xx.x.x'},
+    {c:'kubectl get ingressclass', fx:'read', t:['traefik'],
+     d:'确认集群里有了名为 traefik 的 IngressClass。Ingress 里写 ingressClassName: traefik，就是在指定由它来执行。',
+     out:'NAME      CONTROLLER\ntraefik   traefik.io/ingress-controller'},
+  ]]],
+  expect:'NAME     NAMESPACE  REVISION  STATUS\ntraefik  traefik    1         deployed',
+  note:"service.spec.type=ClusterIP 是为了本机实验简单，后面用 port-forward 访问；在 TKE 上一般用 LoadBalancer，会自动创建 CLB。"},
+
+ {t:"Ingress：按域名把客人领到窗口", tags:["ingress"], v:"warn",
+  why:"写一条规则：Host 为 burger.local 的请求转给 Service burger-chef。用 curl 带 Host 头来模拟域名，不用改 /etc/hosts。",
+  code:[
+   ["1) 创建 Ingress",[
+    heredoc('~/k8s-lab/ingress.yaml','yaml'),
+    'apiVersion: networking.k8s.io/v1','kind: Ingress','metadata:','  name: burger-ingress','  namespace: burger-shop','spec:','  ingressClassName: traefik',
+    '  rules:','  - host: burger.local','    http:','      paths:','      - path: /','        pathType: Prefix','        backend:','          service:','            name: burger-chef','            port:','              number: 80',
+    'EOF',
+    {c:'kubectl apply -f ~/k8s-lab/ingress.yaml', fx:'create', t:['ingress','traefik:modify','apiserver:use'],
+     d:'创建 Ingress 规则。Ingress 本身只是一条记录，真正干活的是 traefik：它监听到新规则后，更新自己的路由表。',
+     flow:['API Server 存下 Ingress 对象','traefik 通过 watch 发现 ingressClassName=traefik 的新规则','traefik 在自己的路由表里加上「burger.local/ → burger-chef:80」'],
+     out:'ingress.networking.k8s.io/burger-ingress created'},
+    {c:'kubectl -n burger-shop get ingress', fx:'read', t:['ingress'], d:'查看 Ingress 的 CLASS、HOSTS 等信息。',
+     out:'NAME             CLASS     HOSTS          PORTS\nburger-ingress   traefik   burger.local   80'},
+   ]],
+   ["2) 把 traefik 入口转发到本机 8000，带 Host 头访问",[
+    {c:'kubectl -n traefik port-forward svc/traefik 8000:80', fx:'local', t:['kubectl','browser','traefik'],
+     d:'把 traefik 的入口转发到本机 8000 端口，模拟「商场大门」。命令会一直挂着，在另一个终端测试。'},
+    '# 另开终端',
+    {c:"curl -H 'Host: burger.local' localhost:8000/whoami", fx:'read', t:['browser','traefik','ingress','svc','pods'],
+     d:'假装访问 burger.local 这个域名：请求先到 traefik，traefik 按 Ingress 规则转给 Service，Service 再选一个 Pod。',
+     args:[["-H 'Host: burger.local'",'手动设置 HTTP Host 头，相当于访问这个域名']],
+     flow:['curl 把请求发到本机 8000 → 隧道 → traefik','traefik 看 Host 头 = burger.local，匹配到 Ingress 规则','转发给 Service burger-chef 后面的一个 Pod','Pod 返回 version 和 Pod 名'],
+     out:'version=v1 pod=burger-chef-xxxx'},
+    {c:"curl -i -H 'Host: other.local' localhost:8000/   # 不匹配规则 → 404", fx:'read', t:['browser','traefik'],
+     d:'换一个没有配置规则的域名，traefik 找不到匹配的规则，直接返回 404。证明它确实在按域名分流。',
+     args:[['-i','同时打印响应头，能看到状态码']],
+     out:'HTTP/1.1 404 Not Found'},
+   ]]],
+  expect:'version=v1 pod=burger-chef-xxxx\nHTTP/1.1 404 Not Found'},
+
+ {t:"生命周期管理：扩容、升级、回滚", tags:["workload"], v:"warn",
+  why:"对应流程最后一步。你只改「期望状态」，Deployment 负责滚动替换 Pod，全程不停服。",
+  code:[
+   ["1) 扩容到 4 个厨师",[
+    {c:'kubectl -n burger-shop scale deploy/burger-chef --replicas=4', fx:'modify', t:['deploy','rs','pods'],
+     d:'把期望副本数从 2 改成 4。只改了 Deployment 的 replicas 字段，剩下的交给控制器。',
+     flow:['Deployment 的 replicas 改为 4','ReplicaSet 的期望数随之变为 4','新建 2 个 Pod，Service 后端自动加入新 Pod'],
+     out:'deployment.apps/burger-chef scaled'},
+    {c:'kubectl -n burger-shop get pods -l app=burger-chef', fx:'read', t:['pods'], d:'应该能看到 4 个 Pod。'},
+   ]],
+   ["2) 滚动升级到 v2（另开终端 watch 能看到新旧 Pod 交替）",[
+    {c:'kubectl -n burger-shop set image deploy/burger-chef chef-robot=localhost:5001/burger:v2', fx:'modify', t:['deploy','rs','pods','registry:use'],
+     d:'把容器 chef-robot 的镜像改成 v2。改的是 Pod 模板，所以会触发滚动更新。',
+     args:[['deploy/burger-chef','要改的 Deployment'],['chef-robot=…','容器名=新镜像（容器名来自 YAML 里 containers.name）']],
+     flow:['Deployment 的 Pod 模板变了','创建一个新的 ReplicaSet（v2），从 0 开始扩','新 Pod 就绪一个，旧 ReplicaSet 就缩一个','直到新的扩到 4 个、旧的缩到 0（旧 RS 保留，用于回滚）'],
+     out:'deployment.apps/burger-chef image updated'},
+    rolloutStatus(),
+    Object.assign(execWhoami(), {out:'version=v2 pod=burger-chef-xxxx', d:'确认现在回应的是 v2。'}),
+    {c:'kubectl -n burger-shop rollout history deploy/burger-chef', fx:'read', t:['deploy','rs'],
+     d:'查看发布历史，每次改 Pod 模板都会产生一个新的 REVISION。', out:'REVISION  CHANGE-CAUSE\n1         <none>\n2         <none>'},
+   ]],
+   ["3) 发现问题，回滚到上一版",[
+    {c:'kubectl -n burger-shop rollout undo deploy/burger-chef', fx:'modify', t:['deploy','rs','pods'],
+     d:'回滚到上一个版本。其实就是把旧的 ReplicaSet 重新扩起来、把新的缩下去，所以很快。',
+     out:'deployment.apps/burger-chef rolled back'},
+    rolloutStatus(),
+    Object.assign(execWhoami(), {out:'version=v1 pod=burger-chef-yyyy', d:'确认已经回到 v1。'}),
+   ]],
+   ["4) 推荐的做法：改 YAML 再 apply（声明式，可进 Git）",[
+    '# 把 burger.yaml 里 replicas 改成 3、image 改成 :v2，然后',
+    {c:'kubectl -n burger-shop diff -f ~/k8s-lab/burger.yaml', fx:'read', t:['files','deploy'],
+     d:'apply 之前先预览：文件和集群里的实际状态有什么差别。不会修改任何东西。', out:'-  replicas: 4\n+  replicas: 3'},
+    {c:'kubectl apply -f ~/k8s-lab/burger.yaml', fx:'modify', t:['deploy','rs','pods'],
+     d:'按文件更新。生产环境推荐这种方式：所有改动都体现在文件里，可以 code review、可以追溯。'},
+   ]]],
+  expect:'deployment "burger-chef" successfully rolled out\nversion=v2 …   # 升级后\nversion=v1 …   # 回滚后'},
+
+ {t:"清理：关店", tags:["cluster"], v:"warn",
+  why:"删除命名空间会连带删掉里面的所有资源。镜像仓库和 traefik 按需保留。",
+  code:[["按需执行",[
+    {c:'kubectl delete namespace burger-shop', fx:'delete', t:['ns-burger','pod-duo','deploy','rs','pods','svc','ingress','fries'],
+     d:'删除整个 burger-shop 命名空间，里面的 Pod、Deployment、Service、Ingress 全部一起删除。',
+     flow:['命名空间进入 Terminating','控制器逐个删除里面的所有资源','全部删完后命名空间消失'],
+     out:'namespace "burger-shop" deleted', tip:'删命名空间是不可恢复的操作，在 TKE 上执行前务必确认当前上下文。'},
+    {c:'helm uninstall traefik -n traefik && kubectl delete namespace traefik   # 不再需要 Ingress 时', fx:'delete', t:['traefik','ns-traefik'],
+     d:'卸载 traefik 这个 Release（Helm 会删掉它创建的所有资源），再删掉空的命名空间。'},
+    {c:'docker rm -f registry                                                 # 不再需要本地仓库时', fx:'local', t:['registry'],
+     d:'强制停止并删除镜像仓库容器。-f = 正在运行也直接删。'},
+  ]]],
+  expect:'namespace "burger-shop" deleted'},
+];
+
+/* ---- YAML 逐行解释 ---- */
+const KIND_DESC = {
+  Pod:'kind: Pod —— 直接创建一个 Pod。实际工作中很少直接建 Pod（挂了没人补），这里是为了观察多容器共享。',
+  Deployment:'kind: Deployment —— 创建「领班」。它自己不干活，负责按模板造 Pod、保持数量、滚动升级。',
+  Service:'kind: Service —— 创建固定的访问入口（点餐窗口），按标签把请求分给 Pod。',
+  Ingress:'kind: Ingress —— 创建七层路由规则（商场导购牌），按域名/路径把外部请求转给 Service。',
+};
+function yamlTargets(p, ctx){
+  const k=ctx.kind;
+  if(k==='Pod'){
+    if(/volume|mountPath/i.test(p)) return ['vol-shared', ctx.container==='helper'?'c-helper':ctx.container==='chef'?'c-chef':'pod-duo'];
+    if(p.includes('containers')) return [ctx.container==='helper'?'c-helper':ctx.container==='chef'?'c-chef':'pod-duo'];
+    return ['pod-duo'];
+  }
+  if(k==='Deployment'){ if(p.startsWith('spec.template')) return ['pods']; if(p.startsWith('spec.selector')) return ['deploy','pods']; return ['deploy']; }
+  if(k==='Service'){ if(p.startsWith('spec.selector')) return ['svc','pods']; return ['svc']; }
+  if(k==='Ingress'){ if(p.includes('backend')) return ['ingress','svc']; if(p.includes('ingressClassName')) return ['ingress','traefik']; return ['ingress']; }
+  return ['files'];
+}
+function yamlExplain(path, key, val, ctx){
+  const p=path.join('.'), k=ctx.kind; const ends=s=>p===s||p.endsWith('.'+s);
+  let d, extra=[];
+  if(p==='apiVersion') d=`API 版本：告诉 K8s 用哪套规则理解这个对象。${val==='apps/v1'?'Deployment 属于 apps 组，所以写 apps/v1。':val==='v1'?'Pod、Service 这类核心资源写 v1。':'Ingress 属于 networking.k8s.io 组。'}`;
+  else if(p==='kind') d=KIND_DESC[val]||`资源类型：${val}`;
+  else if(p==='metadata') d='元数据：给对象起名字、放进哪个命名空间、贴标签。';
+  else if(p==='metadata.name') d=`对象的名字叫 ${val}。之后 kubectl get / describe / delete 都靠它找到这个对象；同一命名空间里同类对象不能重名。`;
+  else if(p==='metadata.namespace') d=`放进 ${val} 命名空间（大楼里的一层楼）。不写就进 default。`;
+  else if(p==='spec') d={Deployment:'规格（期望状态）：下面写的是领班要遵守的规则，控制器负责把现实变成这样。',Service:'规格：这个窗口怎么找厨师、开哪个端口。',Pod:'规格：这个 Pod 里有哪些卷、哪些容器。',Ingress:'规格：路由规则写在这里。'}[k];
+  else if(p==='spec.replicas') d=`期望副本数 = ${val}：Deployment 会始终保持 ${val} 个 Pod，少了补、多了删。之后 kubectl scale 改的就是这个数。`;
+  else if(k==='Deployment' && p==='spec.selector') d='选择器：领班的「认人名单」。Deployment 只管理标签符合下面条件的 Pod。apps/v1 必须写，你最开始遇到的 spec.selector: Required value 报错就是缺了它。';
+  else if(p==='spec.selector.matchLabels') d='按标签精确匹配：下面每个 key: value 都要满足。';
+  else if(k==='Deployment' && p.startsWith('spec.selector.matchLabels.')) d=`要求 Pod 带有标签 ${key}=${val}。必须和下面 template.metadata.labels 里写的一致，否则报 selector does not match template labels。`;
+  else if(k==='Service' && p==='spec.selector') d='选择器：Service 把流量转发给标签匹配的 Pod。';
+  else if(k==='Service' && p.startsWith('spec.selector.')) d=`Service 把请求发给所有带 ${key}=${val} 标签、并且已就绪的 Pod。这些 Pod 的 IP 会被自动写进 EndpointSlice（后端名单）。和 Deployment 无关，只看标签。`;
+  else if(p==='spec.template') d='Pod 模板：Deployment 每造一个新 Pod 都照这个模子来。改了模板里的任何东西（比如镜像）都会触发滚动更新。';
+  else if(p==='spec.template.metadata') d='新 Pod 自己的元数据。';
+  else if(p==='spec.template.metadata.labels') d='给每个新 Pod 贴的标签（工牌）。';
+  else if(p.startsWith('spec.template.metadata.labels.')) { d=`每个新 Pod 都带上 ${key}=${val}。Deployment 的 selector 和 Service 的 selector 都靠这个标签找到 Pod。`; extra=['deploy','svc']; }
+  else if(p==='spec.template.spec') d='Pod 的规格：里面跑哪些容器。';
+  else if(ends('containers')) d='容器列表：一个 Pod 可以有多个容器，每个以「- 」开头。';
+  else if(ends('containers.name')) d=`容器名 = ${val}。kubectl logs / exec 用 -c ${val} 指定它；kubectl set image 也靠它（${val}=新镜像）。`;
+  else if(ends('containers.image')) { d=`镜像地址：节点会从 ${val.includes('/')&&val.split('/')[0].includes(':')?val.split('/')[0]+' 这个仓库':'Docker Hub 镜像源'} 拉取它来启动容器。地址或标签写错 → ImagePullBackOff。`; extra=['registry']; }
+  else if(ends('containers.ports')) d='声明容器提供的端口。主要起说明作用，Service 转发并不依赖这里。';
+  else if(ends('containerPort')) d=`容器里的程序监听 ${val} 端口（nginx 默认就是 80）。`;
+  else if(ends('containers.command')) d='覆盖镜像自带的启动命令。这里让 busybox 先往共享卷写一个文件，再 sleep 3600 保持运行（命令一结束容器就会退出）。';
+  else if(ends('volumeMounts')) d='把 Pod 的卷挂进这个容器。';
+  else if(ends('volumeMounts.name')) d=`挂载名为 ${val} 的卷，对应 spec.volumes 里定义的同名卷。`;
+  else if(ends('mountPath')) d=`挂到容器里的 ${val} 目录。两个容器都挂到 /data，看到的就是同一份文件。`;
+  else if(p==='spec.volumes') d='定义 Pod 级别的存储卷，Pod 里所有容器都能挂载它。';
+  else if(p==='spec.volumes.name') d=`卷的名字 = ${val}，容器里的 volumeMounts 用这个名字引用它。`;
+  else if(ends('emptyDir')) d='空目录卷：Pod 创建时生成一个空目录，Pod 删除时一起删掉。最适合同一个 Pod 里的容器交换文件。';
+  else if(k==='Service' && p==='spec.ports') d='端口映射列表。';
+  else if(k==='Service' && p==='spec.ports.port') d=`Service 自己的端口：集群内用 burger-chef:${val} 访问。`;
+  else if(ends('targetPort')) d=`请求最终转发到 Pod 的 ${val} 端口，必须和容器实际监听的端口一致。`;
+  else if(p==='spec.ingressClassName') d=`由名为 ${val} 的 Ingress 控制器执行这些规则（第 6 步用 Helm 装的那个）。没有控制器，规则不会生效。`;
+  else if(p==='spec.rules') d='路由规则列表，每条以「- 」开头。';
+  else if(ends('rules.host')) d=`只处理 Host 头为 ${val} 的请求，相当于按域名分流。`;
+  else if(ends('rules.http')) d='HTTP 路由规则。';
+  else if(ends('http.paths')) d='按 URL 路径匹配的规则列表。';
+  else if(ends('paths.path')) d=`匹配以 ${val} 开头的路径（/ 就是全部）。`;
+  else if(ends('pathType')) d='Prefix = 前缀匹配；Exact = 必须完全相等。';
+  else if(ends('paths.backend')) d='匹配上以后，请求转给谁。';
+  else if(ends('backend.service')) d='转发给一个 Service。';
+  else if(ends('backend.service.name')) d=`目标 Service = ${val}。`;
+  else if(ends('backend.service.port')) d='目标 Service 的端口。';
+  else if(ends('port.number')) d=`端口号 ${val}，即 Service 的 port 字段。`;
+  else d=`字段 ${key}。`;
+  return {d, t:[...new Set([...yamlTargets(p,ctx), ...extra])]};
+}
+function yamlLine(line, ctx){
+  if(line.trim()==='---'){ ctx.kind=null; ctx.stack=[]; ctx.container=null;
+    return {fx:'field', t:[], d:'YAML 文档分隔符：一个文件里可以放多个资源。上面是 Deployment，下面是 Service。'}; }
+  const body=line.replace(/\s+#.*$/,''); const cm=(line.match(/\s+#\s*(.*)$/)||[])[1];
+  const m=body.match(/^(\s*)(- )?([\w.\-\/]+):\s*(.*)$/);
+  if(!m) return {fx:'field', t:['files'], d:'YAML 内容'};
+  const indent=m[1].length+(m[2]?2:0), key=m[3], val=m[4].trim();
+  while(ctx.stack.length && ctx.stack[ctx.stack.length-1].indent>=indent) ctx.stack.pop();
+  const path=[...ctx.stack.map(s=>s.key), key];
+  ctx.stack.push({indent,key});
+  if(path.length===1 && key==='kind') ctx.kind=val;
+  if(path.join('.').endsWith('containers.name')) ctx.container=val;
+  const r=yamlExplain(path,key,val,ctx);
+  if(m[2]) r.d += '（行首的「- 」表示这是列表里的一项）';
+  if(cm) r.d += `　行尾注释：${cm}`;
+  return {fx:'field', path:path.join(' → '), ...r};
+}
+function dockerLine(line){
+  const s=line.trim();
+  if(s.startsWith('FROM')) return {fx:'field',t:['images'],path:'Dockerfile · FROM',d:'基础镜像：在官方 nginx:alpine（精简 Linux + nginx）的基础上改造。'};
+  if(s.startsWith('ARG')) return {fx:'field',t:['images'],path:'Dockerfile · ARG',d:'构建参数：docker build 时用 --build-arg VERSION=v2 传入，不传默认是 v1。'};
+  if(s.startsWith('RUN')) return {fx:'field',t:['images'],path:'Dockerfile · RUN',d:'构建时执行的命令：生成首页 index.html，内容是 Burger + 版本号。行尾的 \\ 表示命令接到下一行。'};
+  if(s.startsWith('&&')) return {fx:'field',t:['images'],path:'Dockerfile · RUN（续）',d:'继续执行：写一份 nginx 配置。访问 /whoami 会返回 version=版本号 pod=$hostname。$hostname 是 nginx 变量，运行时等于 Pod 名。后面观察负载均衡、升级回滚全靠这个接口。'};
+  return {fx:'field',t:['images'],d:'Dockerfile 内容'};
+}
+
+/* ---- 渲染 ---- */
+const ANN = {}; let annSeq = 0;
+function renderLine(text, kind){
+  if(kind==='comment') return `<span class="cm">${esc(text)}</span>`;
+  if(kind==='yaml'){
+    const [, body, cmt=''] = text.match(/^(.*?)(\s+#.*)?$/);
+    const mm=body.match(/^(\s*-?\s*)([\w.\-\/]+):(.*)$/);
+    const tail = cmt ? `<span class="cm">${esc(cmt)}</span>` : '';
+    return mm ? `${esc(mm[1])}<span class="yk">${esc(mm[2])}</span>:${esc(mm[3])}${tail}` : esc(body)+tail;
+  }
+  if(kind==='docker') return esc(text).replace(/^(\s*)(FROM|ARG|RUN)/,'$1<span class="df">$2</span>');
+  return esc(text).replace(/(\s#\s.*)$/,'<span class="cm">$1</span>');
+}
+function buildBlock(lines){
+  let mode=null, ctx=null, html='', raw=[];
+  for(const item of lines){
+    if(typeof item==='string'){
+      raw.push(item);
+      let a, kind='shell';
+      if(mode && item==='EOF'){ a={fx:'local',t:['files'],d:'heredoc 结束标记：上面的内容到此为止，已经全部写进文件了。'}; mode=null; }
+      else if(mode==='yaml'){ a=yamlLine(item, ctx); kind='yaml'; }
+      else if(mode==='docker'){ a=dockerLine(item); kind='docker'; }
+      else if(item.trim().startsWith('#')){ a={fx:'comment',t:[],d:'以 # 开头的是注释，给人看的说明，shell 不会执行。'}; kind='comment'; }
+      else a={fx:'local',t:[],d:''};
+      const id='a'+(annSeq++); ANN[id]={...a, c:item};
+      html+=`<div class="ln" data-a="${id}" data-fx="${a.fx}">${renderLine(item,kind)||' '}</div>`;
+    } else {
+      const id='a'+(annSeq++); ANN[id]=item;
+      item.c.split('\n').forEach(l=>{ raw.push(l); html+=`<div class="ln" data-a="${id}" data-fx="${item.fx}">${renderLine(l,'shell')}</div>`; });
+      if(item.heredoc){ mode=item.heredoc; ctx={stack:[],kind:null,container:null}; }
+    }
+  }
+  return {html, raw:raw.join('\n')};
+}
+
+const KEY='k8s-lab-progress-v1';
+const done = new Set(JSON.parse(localStorage.getItem(KEY)||'[]'));
+const badge = {ok:'<span class="badge ok">✅ 已在本机验证</span>', part:'<span class="badge part">◐ 部分验证</span>', warn:'<span class="badge warn">⚠ 未在本机验证</span>'};
+const stepsEl = document.getElementById('steps');
+const RAW = [];
+stepsEl.innerHTML = S.map((s,i)=>`
+  <details class="card step ${done.has(i)?'done':''}" data-i="${i}" ${i<=3?'open':''}>
+    <summary><span class="num">${i}</span><h3>${s.t}</h3>${s.tags.map(chipOf).join(' ')} ${badge[s.v]}</summary>
+    <div class="body">
+      <p class="why">${s.why}</p>
+      ${s.code.map(([label,lines])=>{ const b=buildBlock(lines); RAW.push(b.raw);
+        return `<div class="blk"><div class="label"><span>${label}</span><button class="copy" data-r="${RAW.length-1}">复制整段</button></div><div class="code"><div class="code-in">${b.html}</div></div></div>`; }).join('')}
+      <div class="expect"><b>这一步做完，大致会看到</b><pre>${esc(s.expect)}</pre></div>
+      ${s.note?`<div class="note">💡 ${s.note}</div>`:''}
+      <label class="donebox"><input type="checkbox" ${done.has(i)?'checked':''}> 这一步我做完了</label>
+    </div>
+  </details>`).join('');
+
+/* ---- 悬停 / 固定 / 高亮 ---- */
+const dg = document.getElementById('dg'), explain = document.getElementById('explain');
+let pinned = null;
+function lightUp(a){
+  dg.querySelectorAll('.bx').forEach(b=>{ b.classList.remove('lit','fx-create','fx-modify','fx-read','fx-delete','fx-local','fx-field','fx-use'); b.removeAttribute('data-badge'); });
+  const t=(a&&a.t)||[];
+  dg.classList.toggle('active', t.length>0);
+  t.map(parseT).forEach(({id,fx})=>{ const b=dg.querySelector(`[data-id="${id}"]`); if(!b) return;
+    const f=fx||a.fx; b.classList.add('lit','fx-'+f); b.dataset.badge=FX[f][0];
+    let p=b.parentElement.closest('.bx'); while(p){ p.classList.add('lit'); p=p.parentElement.closest('.bx'); } });
+}
+function renderExplain(a){
+  if(!a){ explain.innerHTML = defaultExplain(); return; }
+  let h = `<div class="ex-cmd">${esc(a.c.trim())}</div><span class="fxb fx-${a.fx}">${FX[a.fx][1]}</span>${a.path?`<span class="ex-path">${esc(a.path)}</span>`:''}`;
+  h += a.d ? `<p class="ex-d">${a.d}</p>` : `<p class="ex-d" style="color:var(--muted)">（这一行是上面命令的一部分）</p>`;
+  if(a.args) h += `<div class="ex-h">参数拆解</div><table class="ex-args">${a.args.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>`;
+  if(a.flow) h += `<div class="ex-h">执行后，背后依次发生了什么</div><div class="ex-flow">${a.flow.map((f,i)=>`<div><b>${i+1}</b><span>${f}</span></div>`).join('')}</div>`;
+  if(a.out) h += `<div class="ex-h">执行后你会看到（大致）</div><pre class="ex-out">${esc(a.out)}</pre>`;
+  if(a.tip) h += `<div class="ex-tip">💡 ${a.tip}</div>`;
+  if(a.t && a.t.length) h += `<div class="ex-h">在状态图中高亮了</div><div class="ex-tg">${a.t.map(parseT).map(({id,fx})=>`<span>${NAME[id]||id} · ${FX[fx||a.fx][0]}</span>`).join('')}</div>`;
+  if(pinned) h += `<div class="pinhint" style="margin-top:10px">📌 已固定，再点一次这一行取消</div>`;
+  explain.innerHTML = h;
+}
+function defaultExplain(){
+  return `<div class="panel-h"><b>逐行讲解</b></div>
+  <p class="ex-d">👈 把鼠标放到左边任意一行命令或 YAML 上，这里会显示：</p>
+  <div class="ex-flow"><div><b>1</b><span>这行做了什么（白话）</span></div><div><b>2</b><span>每个参数的意思</span></div><div><b>3</b><span>执行后集群里依次发生了什么</span></div><div><b>4</b><span>执行后大致会看到什么输出</span></div></div>
+  <p class="ex-d">同时上面的状态图会高亮这行影响的对象，角标表示 <b style="color:var(--fx-create)">新建</b> / <b style="color:var(--fx-modify)">修改</b> / <b style="color:var(--fx-delete)">删除</b> / <b style="color:var(--fx-read)">查看</b>。</p>
+  <p class="ex-d" style="color:var(--muted)">也可以把鼠标放到状态图的方块上，看它是什么。</p>`;
+}
+function activate(el){
+  document.querySelectorAll('.ln.on').forEach(x=>x.classList.remove('on'));
+  if(!el){ lightUp(null); renderExplain(null); return; }
+  const id=el.dataset.a; document.querySelectorAll(`.ln[data-a="${id}"]`).forEach(x=>x.classList.add('on'));
+  lightUp(ANN[id]); renderExplain(ANN[id]);
+}
+stepsEl.addEventListener('mouseover', e=>{ const ln=e.target.closest('.ln'); if(ln && !pinned) activate(ln); });
+stepsEl.addEventListener('click', e=>{
+  const ln=e.target.closest('.ln'); if(!ln) return;
+  document.querySelectorAll('.ln.pin').forEach(x=>x.classList.remove('pin'));
+  if(pinned===ln.dataset.a){ pinned=null; activate(ln); return; }
+  pinned=ln.dataset.a; document.querySelectorAll(`.ln[data-a="${pinned}"]`).forEach(x=>x.classList.add('pin'));
+  activate(ln);
+});
+dg.querySelectorAll('.bx').forEach(b=>{
+  b.addEventListener('mouseenter', e=>{ if(pinned) return; e.stopPropagation(); explain.innerHTML=`<div class="panel-h"><b>${NAME[b.dataset.id]||''}</b></div><p class="ex-d">${BOX[b.dataset.id]||''}</p>`; });
+});
+document.getElementById('togglePanel').onclick = e=>{
+  const p=document.getElementById('panel'); p.classList.toggle('collapsed'); e.target.textContent=p.classList.contains('collapsed')?'展开':'收起';
+};
+renderExplain(null);
+
+/* ---- 复制 / 进度 ---- */
+stepsEl.querySelectorAll('.copy').forEach(b=>{
+  b.onclick=e=>{ e.preventDefault();
+    const text=RAW[+b.dataset.r];
+    const ok=()=>{b.textContent='已复制';setTimeout(()=>b.textContent='复制整段',1200)};
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(ok)}
+    else{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();ok()}
+  };
+});
+function updateProg(){
+  document.getElementById('progTxt').textContent = `${done.size} / ${S.length}`;
+  document.getElementById('progBar').style.width = (done.size/S.length*100)+'%';
+  localStorage.setItem(KEY, JSON.stringify([...done]));
+}
+stepsEl.querySelectorAll('.step').forEach(el=>{
+  const i=+el.dataset.i;
+  el.querySelector('.donebox input').addEventListener('change',e=>{
+    e.target.checked?done.add(i):done.delete(i); el.classList.toggle('done',e.target.checked); updateProg();
+  });
+});
+document.getElementById('resetProg').onclick=()=>{done.clear();stepsEl.querySelectorAll('.step').forEach(el=>{el.classList.remove('done');el.querySelector('.donebox input').checked=false});updateProg()};
+updateProg();
+
+/* ================= ⑤ 常见坑 ================= */
+const pits = [
+  ["spec.selector: Required value\n`selector` does not match template `labels`","apps/v1 的 Deployment 必须写 spec.selector，且 matchLabels 要出现在 template.metadata.labels 里。见实践第 4 步的写法（悬停那几行 YAML 看解释）。"],
+  ["ImagePullBackOff / ErrImagePull","节点拉不到镜像：地址或标签写错、仓库没登录、网络不通。kubectl describe pod 看 Events 最后几行。"],
+  ["CrashLoopBackOff","容器起来就退出。kubectl logs <pod> --previous 看上一次崩溃的日志。"],
+  ["Service 访问不通 / endpoints 为空","Service 的 selector 和 Pod 的 labels 对不上，或 targetPort 写错。先看 kubectl get endpointslice。"],
+  ["Ingress 建了但 404 / 没有 ADDRESS","集群里没有 Ingress Controller，或 ingressClassName 不对。colima 默认禁用了 traefik，需要按第 6 步安装。"],
+  ["version difference between client and server exceeds the supported minor version skew","kubectl 和集群版本相差超过 1 个小版本。你现在两边都是 1.34.1，已解决。"],
+  ["bind: address already in use (5000)","macOS 的 AirPlay 接收器占用 5000，所以本地仓库用 5001。"],
+];
+document.getElementById('pitBox').innerHTML = pits.map(([s,f])=>`<div class="pit"><div class="sym">${esc(s).replace(/\n/g,'<br>')}</div><div>${esc(f)}</div></div>`).join('');
+</script>
+</body>
+</html>

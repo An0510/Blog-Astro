@@ -1,0 +1,33 @@
+---
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+---
+
+<MainGridLayout title="K8s 核心概念图解" description="可交互的 Kubernetes 核心概念讲解：从一家汉堡店开始，看懂集群、Pod、工作负载、Service、Ingress、Helm 和镜像仓库。">
+	<iframe
+		id="k8s-embed"
+		class="full-embed"
+		src="/demos/k8s-concepts.html"
+		title="K8s 核心概念图解"
+	></iframe>
+	<style is:inline>
+		html:has(#k8s-embed) {
+			overflow: hidden;
+		}
+		/* 入场动画留下的 transform 会让 position: fixed 改为相对 #content-wrapper 定位 */
+		html:has(#k8s-embed) #content-wrapper {
+			transform: none !important;
+			animation: none !important;
+			opacity: 1 !important;
+		}
+		#k8s-embed {
+			position: fixed;
+			left: 0;
+			top: var(--k8s-embed-top, 4.5rem);
+			width: 100vw;
+			height: calc(100vh - var(--k8s-embed-top, 4.5rem));
+			border: 0;
+			z-index: 40;
+			background: #fff;
+		}
+	</style>
+</MainGridLayout>
