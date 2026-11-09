@@ -48,7 +48,7 @@ export const siteConfig: SiteConfig = {
 	subtitle: "前端与 AI 学习笔记",
 
 	// 站点 URL
-	site_url: "https://annan.life",
+	site_url: "https://an2333.com",
 
 	// 站点描述
 	description:

@@ -6,4 +6,4 @@
 
 ## 关于本站
 
-本站使用 [Astro](https://astro.build) 构建，主题是 [Firefly](https://github.com/CuteLeaf/Firefly)，源码在 [An0510/ANblog](https://github.com/An0510/ANblog)。
+本站使用 [Astro](https://astro.build) 构建，主题是 [Firefly](https://github.com/CuteLeaf/Firefly)，源码在 [An0510/Blog-Astro](https://github.com/An0510/Blog-Astro)。

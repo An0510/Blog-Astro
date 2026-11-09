@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync the built an2333.com site into Nginx
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ExecStart=/opt/Blog-Astro/scripts/sync-nginx.sh
