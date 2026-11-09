@@ -39,12 +39,24 @@ jobs:
         run: pnpm run build
 
       - name: Publish site branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          cd dist
+          test -f dist/index.html
+          du -sh dist >> "$GITHUB_STEP_SUMMARY"
+          header=$(git config --get http.https://github.com/.extraheader)
+          tmp=$(mktemp -d)
+          cp -a dist/. "$tmp/"
+          cd "$tmp"
           git init -b site
           git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Deploy site"
-          git -c http.extraheader="AUTHORIZATION: bearer ${GITHUB_TOKEN}" push --force "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/site
+          git config http.https://github.com/.extraheader "$header"
+          if ! git -c http.https://github.com/.extraheader="$header" push --force "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/site > /tmp/push.out 2>&1; then
+            {
+              echo "### Publish failed"
+              echo '```'
+              cat /tmp/push.out
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
