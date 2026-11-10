@@ -41,22 +41,22 @@ jobs:
       - name: Publish site branch
         run: |
           set -euo pipefail
-          test -f dist/index.html
+          if [[ ! -f dist/index.html ]]; then
+            echo "::error::dist/index.html was not produced"
+            exit 1
+          fi
           du -sh dist >> "$GITHUB_STEP_SUMMARY"
-          header=$(git config --get http.https://github.com/.extraheader)
-          tmp=$(mktemp -d)
-          cp -a dist/. "$tmp/"
-          cd "$tmp"
-          git init -b site
+          site=$(mktemp -d)
+          cp -a dist/. "$site/"
+          git reset --hard
+          git clean -fdx
+          git switch --orphan site-tmp
+          git rm -rf --quiet .
+          cp -a "$site"/. .
+          rm -rf "$site"
           git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Deploy site"
-          git config http.https://github.com/.extraheader "$header"
-          if ! git -c http.https://github.com/.extraheader="$header" push --force "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/site > /tmp/push.out 2>&1; then
-            {
-              echo "### Publish failed"
-              echo '```'
-              cat /tmp/push.out
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
+          if ! git push --force origin HEAD:refs/heads/site > /tmp/push.out 2>&1; then
+            echo "::error::$(head -c 500 /tmp/push.out | tr '\n' ' ')"
             exit 1
           fi
