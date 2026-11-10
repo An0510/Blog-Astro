@@ -48,6 +48,8 @@ jobs:
           du -sh dist >> "$GITHUB_STEP_SUMMARY"
           site=$(mktemp -d)
           cp -a dist/. "$site/"
+          git reset --hard
+          git clean -fdx
           git switch --orphan site-tmp
           git rm -rf --ignore-unmatch --quiet .
           git clean -fdx
