@@ -48,15 +48,11 @@ jobs:
           du -sh dist >> "$GITHUB_STEP_SUMMARY"
           site=$(mktemp -d)
           cp -a dist/. "$site/"
-          git reset --hard
-          git clean -fdx
           git switch --orphan site-tmp
-          git rm -rf --quiet .
+          git rm -rf --ignore-unmatch --quiet .
+          git clean -fdx
           cp -a "$site"/. .
           rm -rf "$site"
-          git add -A
+          git add -Af
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Deploy site"
-          if ! git push --force origin HEAD:refs/heads/site > /tmp/push.out 2>&1; then
-            echo "::error::$(head -c 500 /tmp/push.out | tr '\n' ' ')"
-            exit 1
-          fi
+          git push --force origin HEAD:refs/heads/site
