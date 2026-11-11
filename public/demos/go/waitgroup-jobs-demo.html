@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="waitgroup-jobs-demo">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WaitGroup + jobs channel 执行演示</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --danger: #f07178;
+      --main: #4c6ef5;
+      --w1: #12b886;
+      --w2: #fab005;
+      --w3: #e64980;
+      --ch: #2a6f97;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 20px 56px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 650;
+      margin: 0 0 6px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 18px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .ctrl {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .ctrl button {
+      border: 1px solid var(--border);
+      background: #121a26;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .ctrl button:hover { border-color: var(--accent); }
+    .ctrl button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .ctrl button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #041018;
+      font-weight: 600;
+    }
+    .step-label {
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .step-label strong { color: var(--accent); }
+    .stage {
+      display: grid;
+      grid-template-columns: 140px 1fr 160px;
+      gap: 14px;
+      align-items: stretch;
+      min-height: 280px;
+    }
+    @media (max-width: 700px) {
+      .stage { grid-template-columns: 1fr; }
+    }
+    .col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .actor {
+      border-radius: 12px;
+      padding: 12px 10px;
+      border: 2px solid transparent;
+      min-height: 72px;
+      transition: box-shadow .25s, border-color .25s, transform .2s, background .25s;
+      background: #121a26;
+    }
+    .actor.active {
+      box-shadow: 0 0 0 2px rgba(61,156,240,.35);
+      transform: translateY(-1px);
+    }
+    .actor.done-state {
+      opacity: 0.72;
+      border-color: rgba(62,207,142,.45);
+    }
+    .actor .name {
+      font-weight: 650;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+    .actor .status {
+      font-size: 0.82rem;
+      color: var(--muted);
+      min-height: 2.4em;
+    }
+    .main { border-color: rgba(76,110,245,.45); background: rgba(76,110,245,.12); }
+    .w1 { border-color: rgba(18,184,134,.45); background: rgba(18,184,134,.1); }
+    .w2 { border-color: rgba(250,176,5,.45); background: rgba(250,176,5,.1); }
+    .w3 { border-color: rgba(230,73,128,.45); background: rgba(230,73,128,.1); }
+
+    .channel-box {
+      border: 2px dashed rgba(42,111,151,.7);
+      border-radius: 14px;
+      padding: 14px 12px;
+      background: rgba(42,111,151,.12);
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      transition: border-color .25s, box-shadow .25s;
+    }
+    .channel-box.hot {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(61,156,240,.25);
+    }
+    .channel-box.closed {
+      border-style: solid;
+      border-color: var(--danger);
+      background: rgba(240,113,120,.08);
+    }
+    .ch-title {
+      font-weight: 650;
+      font-size: 0.95rem;
+    }
+    .ch-meta {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .token {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: var(--ch);
+      color: #fff;
+      font-weight: 700;
+      font-size: 1rem;
+      opacity: 0;
+      transform: scale(.6);
+      transition: opacity .25s, transform .25s;
+    }
+    .token.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .wg-box {
+      margin-top: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      background: #121a26;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .wg-box.active {
+      border-color: var(--warn);
+      box-shadow: 0 0 0 2px rgba(240,180,41,.2);
+    }
+    .counter {
+      font-size: 1.6rem;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+      color: var(--warn);
+      min-width: 2.2em;
+      text-align: center;
+    }
+    .counter.zero { color: var(--ok); }
+    .code {
+      margin-top: 14px;
+      background: #0b1018;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.55;
+      white-space: pre;
+    }
+    .code .hl {
+      background: rgba(61,156,240,.22);
+      outline: 1px solid rgba(61,156,240,.45);
+      border-radius: 4px;
+    }
+    .note h2 {
+      margin: 0 0 10px;
+      font-size: 1.05rem;
+    }
+    .note p, .note li {
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .note .muted { color: var(--muted); }
+    .kw {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 6px;
+      background: rgba(61,156,240,.18);
+      color: #9ec9f5;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.84em;
+    }
+    .tip {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(240,180,41,.1);
+      border: 1px solid rgba(240,180,41,.35);
+      font-size: 0.88rem;
+    }
+    .log {
+      margin-top: 10px;
+      max-height: 220px;
+      overflow: auto;
+      font-size: 0.82rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    .log div { margin-bottom: 6px; }
+    .log .now { color: var(--ok); }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 12px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; margin-right: 4px;
+    }
+  </style>
+  <script>
+    if (window.parent !== window) document.documentElement.classList.add("go-demo-is-embed");
+  </script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>WaitGroup + 无缓冲 jobs channel：逐步执行</h1>
+    <p class="sub">对应这段代码：3 个 worker + 只发送 1 个任务 + <span class="kw">close</span> + <span class="kw">Wait</span>。点「下一步」看谁真正拿到任务。</p>
+
+    <div class="layout">
+      <div class="card">
+        <div class="ctrl">
+          <button type="button" id="btnPrev">上一步</button>
+          <button type="button" class="primary" id="btnNext">下一步</button>
+          <button type="button" id="btnAuto">自动播放</button>
+          <button type="button" id="btnReset">重置</button>
+        </div>
+        <div class="step-label">步骤 <strong id="stepNum">0</strong> / <span id="stepTotal">0</span> · <span id="stepTitle">初始</span></div>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--main)"></i>main</span>
+          <span><i class="dot" style="background:var(--w1)"></i>worker1</span>
+          <span><i class="dot" style="background:var(--w2)"></i>worker2</span>
+          <span><i class="dot" style="background:var(--w3)"></i>worker3</span>
+          <span>无缓冲 channel：<span class="kw">make(chan int)</span></span>
+        </div>
+
+        <div class="stage">
+          <div class="col">
+            <div class="actor main" id="mainActor">
+              <div class="name">main（也是 goroutine）</div>
+              <div class="status" id="mainStatus">准备开始</div>
+            </div>
+            <div class="wg-box" id="wgBox">
+              <div>
+                <div style="font-weight:650">sync.WaitGroup</div>
+                <div class="ch-meta">Add / Done / Wait</div>
+              </div>
+              <div class="counter" id="wgCount">0</div>
+            </div>
+          </div>
+
+          <div class="channel-box" id="channelBox">
+            <div class="ch-title">jobs channel（无缓冲）</div>
+            <div class="token" id="jobToken">1</div>
+            <div class="ch-meta" id="chMeta">容量 0 · 发送/接收必须配对</div>
+          </div>
+
+          <div class="col">
+            <div class="actor w1" id="w1">
+              <div class="name">worker 1</div>
+              <div class="status" id="w1Status">未启动</div>
+            </div>
+            <div class="actor w2" id="w2">
+              <div class="name">worker 2</div>
+              <div class="status" id="w2Status">未启动</div>
+            </div>
+            <div class="actor w3" id="w3">
+              <div class="name">worker 3</div>
+              <div class="status" id="w3Status">未启动</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="code" id="codeBlock"></div>
+      </div>
+
+      <div class="card note">
+        <h2>本步说明</h2>
+        <div id="noteBody"></div>
+        <div class="tip" id="tipBox"></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const CODE_LINES = [
+      'jobs := make(chan int)                 // 无缓冲 channel',
+      'var wg sync.WaitGroup',
+      'for i := 0; i < 3; i++ {',
+      '    wg.Add(1)                          // 计数 +1',
+      '    go func() {',
+      '        defer wg.Done()                // 退出时计数 -1',
+      '        for j := range jobs {          // 阻塞接收，直到 close',
+      '            _ = j',
+      '        }',
+      '    }()',
+      '}',
+      'jobs <- 1                              // 发送 1 个任务',
+      'close(jobs)                            // 不再有新任务',
+      'wg.Wait()                              // 等到计数归零',
+    ];
+
+    // highlight indices into CODE_LINES for each step
+    const steps = [
+      {
+        title: '初始状态',
+        hl: [],
+        wg: 0,
+        closed: false,
+        token: false,
+        main: '创建 jobs（无缓冲）和 WaitGroup',
+        workers: ['未启动', '未启动', '未启动'],
+        active: ['main'],
+        note: `<p>先看整条链路的角色：</p>
+          <ul>
+            <li><span class="kw">main</span>：发任务、关 channel、最后 Wait</li>
+            <li>3 个 <span class="kw">goroutine</span> worker：抢同一个 <span class="kw">jobs</span></li>
+            <li><span class="kw">WaitGroup</span>：计数还有几个 worker 没结束</li>
+            <li><span class="kw">jobs</span>：无缓冲 <span class="kw">make(chan int)</span></li>
+          </ul>`,
+        tip: '关键词：channel · WaitGroup · goroutine',
+        log: '开始演示这段示例代码的执行顺序（调度细节简化，方便理解）。'
+      },
+      {
+        title: 'wg.Add(1) 三次',
+        hl: [2, 3],
+        wg: 3,
+        closed: false,
+        token: false,
+        main: '循环里 Add(1) × 3，计数变成 3',
+        workers: ['即将启动…', '即将启动…', '即将启动…'],
+        active: ['main', 'wg'],
+        note: `<p>每次准备开一个 worker 前先 <span class="kw">wg.Add(1)</span>。</p>
+          <p class="muted">计数从 0 → 1 → 2 → 3。表示 main 还要等 3 个任务完成信号。</p>`,
+        tip: '关键词：WaitGroup · Add —— 登记“还要等几个”',
+        log: 'WaitGroup 计数 = 3'
+      },
+      {
+        title: '启动 3 个 worker',
+        hl: [4, 5, 6],
+        wg: 3,
+        closed: false,
+        token: false,
+        main: '三个 go func 已启动，自己继续往后走',
+        workers: [
+          '卡在 for range jobs（等接收）',
+          '卡在 for range jobs（等接收）',
+          '卡在 for range jobs（等接收）'
+        ],
+        active: ['w1', 'w2', 'w3'],
+        note: `<p>三个 worker 都进入 <span class="kw">for range jobs</span>。</p>
+          <p>无缓冲 channel 里还没有值，也还没 <span class="kw">close</span>，所以三个都在 <strong>阻塞接收</strong>——只卡住各自的 goroutine，不是死锁。</p>`,
+        tip: '关键词：range · 阻塞 · 无缓冲 channel',
+        log: '3 个 worker 在 range 上等待发送方'
+      },
+      {
+        title: 'jobs ← 1（配对发送）',
+        hl: [11],
+        wg: 3,
+        closed: false,
+        token: true,
+        main: '执行 jobs <- 1，与某个等待中的 worker 配对',
+        workers: [
+          '收到 j=1，处理 _ = j',
+          '仍在 range 等待…',
+          '仍在 range 等待…'
+        ],
+        active: ['main', 'channel', 'w1'],
+        note: `<p><strong>重点：</strong>只有 <em>一个</em> worker 能拿到这唯一的任务。</p>
+          <p>无缓冲下 <span class="kw">jobs &lt;- 1</span> 与某一个 <span class="kw">&lt;-jobs</span>（range 内部）配对完成；另外两个继续等。</p>
+          <p class="muted">真实调度下也可能是 worker2/3 抢到；演示固定给 worker1，方便看清“不是每人一份”。</p>`,
+        tip: '关键词：发送 ch<- · 接收 · 配对/握手 —— 3 人抢 1 个任务',
+        log: '仅 worker1 收到任务 1；worker2/3 仍阻塞在 range'
+      },
+      {
+        title: 'worker1 处理完，再进 range',
+        hl: [6, 7, 8],
+        wg: 3,
+        closed: false,
+        token: false,
+        main: '发送已完成，准备 close(jobs)',
+        workers: [
+          '处理完毕，再次卡在 range 等待',
+          '仍在 range 等待…',
+          '仍在 range 等待…'
+        ],
+        active: ['w1'],
+        note: `<p>worker1 的 <span class="kw">_ = j</span> 跑完后，循环继续，又回到 <span class="kw">range</span> 等下一次接收。</p>
+          <p>此时三个 worker 再次都在等；计数仍是 3（还没人退出，<span class="kw">Done</span> 还没执行）。</p>`,
+        tip: '关键词：range 会一直接收，直到 channel 被 close',
+        log: '任务处理完；无人 Done，WaitGroup 仍为 3'
+      },
+      {
+        title: 'close(jobs)',
+        hl: [12],
+        wg: 3,
+        closed: true,
+        token: false,
+        main: 'close(jobs)：声明不会再发送',
+        workers: [
+          '发现 channel 已关闭且无剩余数据 → 结束 range',
+          '发现 channel 已关闭且无剩余数据 → 结束 range',
+          '发现 channel 已关闭且无剩余数据 → 结束 range'
+        ],
+        active: ['main', 'channel', 'w1', 'w2', 'w3'],
+        note: `<p><span class="kw">close(jobs)</span> 通知所有接收方：不会再有新任务。</p>
+          <p>缓冲区（这里容量 0）也没有残留值，于是三个 worker 的 <span class="kw">for range</span> 都结束。</p>
+          <p class="muted">没抢到任务的 worker2/3 也会因 close 而正常退出——这正是“优雅收工”。</p>`,
+        tip: '关键词：close · range 结束 —— 没拿到任务的人也会退出',
+        log: 'close 后，3 个 range 全部结束'
+      },
+      {
+        title: 'defer wg.Done() × 3',
+        hl: [5],
+        wg: 0,
+        closed: true,
+        token: false,
+        main: '仍在 wg.Wait() 上阻塞…',
+        workers: [
+          '函数返回 → defer Done（计数 -1）',
+          '函数返回 → defer Done（计数 -1）',
+          '函数返回 → defer Done（计数 -1）'
+        ],
+        active: ['w1', 'w2', 'w3', 'wg'],
+        doneWorkers: true,
+        note: `<p>每个 worker 函数返回前执行 <span class="kw">defer wg.Done()</span>，计数 3→2→1→0。</p>
+          <p><span class="kw">defer</span> 保证即便中间有提前 return，也会减计数。</p>`,
+        tip: '关键词：defer · Done —— 计数减 1',
+        log: '三次 Done 后 WaitGroup = 0'
+      },
+      {
+        title: 'wg.Wait() 返回',
+        hl: [13],
+        wg: 0,
+        closed: true,
+        token: false,
+        main: '计数归零，Wait 返回，main 继续/结束',
+        workers: ['已退出', '已退出', '已退出'],
+        active: ['main', 'wg'],
+        doneWorkers: true,
+        note: `<p><span class="kw">wg.Wait()</span> 一直阻塞到计数为 0，然后返回。</p>
+          <p>整条流程：<strong>Add×3 → 启动并 range 等待 → 发送 1 个任务（仅 1 人处理）→ close → 全部退出 range → Done×3 → Wait 返回</strong>。</p>`,
+        tip: '关键词：Wait —— 等到所有 worker 的 Done',
+        log: '演示结束：优雅退出完成，无死锁'
+      }
+    ];
+
+    let idx = 0;
+    let timer = null;
+
+    const $ = (id) => document.getElementById(id);
+    const workerIds = ['w1', 'w2', 'w3'];
+
+    function renderCode(hl) {
+      const set = new Set(hl);
+      $('codeBlock').innerHTML = CODE_LINES.map((line, i) => {
+        const safe = line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        return set.has(i) ? `<span class="hl">${safe}</span>` : safe;
+      }).join('\n');
+    }
+
+    function clearActive() {
+      ['mainActor', 'w1', 'w2', 'w3', 'channelBox', 'wgBox'].forEach(id => {
+        $(id).classList.remove('active');
+      });
+      workerIds.forEach(id => $(id).classList.remove('done-state'));
+    }
+
+    function applyStep(i) {
+      const s = steps[i];
+      idx = i;
+      $('stepNum').textContent = i;
+      $('stepTotal').textContent = steps.length - 1;
+      $('stepTitle').textContent = s.title;
+      $('wgCount').textContent = s.wg;
+      $('wgCount').classList.toggle('zero', s.wg === 0);
+      $('mainStatus').textContent = s.main;
+      s.workers.forEach((t, k) => $(`w${k + 1}Status`).textContent = t);
+
+      clearActive();
+      (s.active || []).forEach(a => {
+        if (a === 'main') $('mainActor').classList.add('active');
+        else if (a === 'channel') $('channelBox').classList.add('active', 'hot');
+        else if (a === 'wg') $('wgBox').classList.add('active');
+        else if (workerIds.includes(a)) $(a).classList.add('active');
+      });
+      if (!(s.active || []).includes('channel')) {
+        $('channelBox').classList.remove('hot');
+      }
+      $('channelBox').classList.toggle('closed', !!s.closed);
+      $('chMeta').textContent = s.closed
+        ? '已 close · range 将结束'
+        : '容量 0 · 发送/接收必须配对';
+      $('jobToken').classList.toggle('show', !!s.token);
+      if (s.doneWorkers) workerIds.forEach(id => $(id).classList.add('done-state'));
+
+      renderCode(s.hl);
+      $('noteBody').innerHTML = s.note;
+      $('tipBox').textContent = s.tip;
+      $('log').innerHTML = `<div class="now">● ${s.log}</div>`;
+
+      $('btnPrev').disabled = i <= 0;
+      $('btnNext').disabled = i >= steps.length - 1;
+    }
+
+    function stopAuto() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+        $('btnAuto').textContent = '自动播放';
+      }
+    }
+
+    $('btnNext').onclick = () => {
+      stopAuto();
+      if (idx < steps.length - 1) applyStep(idx + 1);
+    };
+    $('btnPrev').onclick = () => {
+      stopAuto();
+      if (idx > 0) applyStep(idx - 1);
+    };
+    $('btnReset').onclick = () => {
+      stopAuto();
+      applyStep(0);
+    };
+    $('btnAuto').onclick = () => {
+      if (timer) {
+        stopAuto();
+        return;
+      }
+      $('btnAuto').textContent = '暂停';
+      if (idx >= steps.length - 1) applyStep(0);
+      timer = setInterval(() => {
+        if (idx >= steps.length - 1) {
+          stopAuto();
+          return;
+        }
+        applyStep(idx + 1);
+      }, 1800);
+    };
+
+    applyStep(0);
+  </script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>

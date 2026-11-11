@@ -1,0 +1,154 @@
+---
+title: "Go context：协作取消，不是强杀 goroutine"
+published: 2026-11-11
+description: "context 把取消、超时和请求级值绑在同一条调用链上。Background 是空根，cancel 的实质是关闭 Done。必须自己听信号；runtime 不会因为 cancel 就杀掉 goroutine。"
+tags: ["Go", "context", "并发"]
+category: "Go"
+series: "Go 复习笔记"
+seriesOrder: 5
+---
+
+import GoDemoEmbed from "@/components/misc/GoDemoEmbed.astro";
+
+这是「Go 复习笔记」第五篇，也是本系列最后一篇，接在 [WaitGroup 与 GMP](/posts/go/04-waitgroup-mutex-gmp/) 后面。前面已经把 [channel 的 close 收尾](/posts/go/03-goroutine-channel-select/) 和「等人退完」分开了，这里专门看「叫停」这件事。
+
+## context 到底解决什么
+
+`context.Context` 把三件事绑在同一个接口上，再沿着调用链往下传：
+
+1. **取消**：请求被中止、调用方决定别干了。
+2. **超时 / 截止**：`WithTimeout` / `WithDeadline`。
+3. **请求级值**：少量元数据，例如 trace id。不要把大对象或可选依赖塞进去。
+
+一句话：它描述的是**这条调用链该何时停、最多干多久、带什么请求元数据**。根常用 `context.Background()`（测试里还不清楚该传什么时，可以用 `context.TODO()` 占位）；再往下派生 `WithCancel`、`WithTimeout`、`WithDeadline`、`WithValue`。
+
+`Done()` 返回一个只读 channel，取消或超时后这个 channel 会被**关闭**。关闭可以被多个接收者同时感知，所以是广播。核心是**协作取消（cooperative cancellation）**：调用方喊停，被调方自己查 `Done` 或 `Err` 再退出——不是杀线程，也没有「杀掉某个 goroutine」的 API。
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+select {
+case <-time.After(5 * time.Second):
+case <-ctx.Done():
+	return ctx.Err() // 常见是 context.DeadlineExceeded
+}
+```
+
+## 原理三句话
+
+1. `WithCancel(parent)` 造出一对：子 `ctx` 加上 `cancel` 函数。
+2. `cancel()` 的实质是**关闭**该 context 的 `Done` channel，所有正在 `<-ctx.Done()` 的接收者会立刻可读。
+3. 子 context 挂在父下面：父一取消，子也会取消（向下传播）。子自己 `cancel` **不会**取消父。
+
+凡是 `WithCancel` / `WithTimeout` / `WithDeadline`，都应该在创建处 `defer cancel()`，即使提前返回也把计时器和子树释放掉。`cancel` 多次调用是安全的。
+
+还可以在循环里查 `ctx.Err()`：还没取消时是 `nil`，否则是 `context.Canceled` 或 `context.DeadlineExceeded`。适合非阻塞的循环里主动询问。
+
+> [!WARNING]
+> **协作式，不是强杀。** 运行时不会因为 `cancel` 就干掉 goroutine。代码必须在 `select` 里带上 `<-ctx.Done()`，或在循环里判断 `ctx.Err() != nil`。不听这个信号的「聋子」会继续跑：比如只写 `time.Sleep(5 * time.Second)`，取消了也照睡。硬掐的后果往往是锁没释放、文件没关掉，所以 Go 选择协作退出。
+
+<GoDemoEmbed
+  id="context-cancel-principle-demo"
+  src="/demos/go/context-cancel-principle-demo.html"
+  title="context 取消原理（交互演示）"
+  hint="点「播放」或「下一步」，看 cancel 如何关闭 Done、取消如何传到子 context，以及不听信号的「聋子」为什么还在跑。"
+/>
+
+对照一个常见写法：需要等待一段时间，但又希望取消时立刻醒过来，就用 `select` 同时听 timer 和 `ctx.Done()`，而不是无条件 `Sleep`。
+
+<details>
+<summary>追问：别的语言有类似实现吗？</summary>
+
+思想类似的不少，很少叫同一个 API 名：
+
+- **JS：** `AbortController` / `AbortSignal`（例如给 `fetch` 取消）最像。习惯是把 `signal` 塞进 `fetch(url, { signal })`；Go 则是几乎处处把 `ctx` 当作函数的第一个参数往下传，整条链都能听到同一次取消。
+- **.NET：** `CancellationToken` 很常见。
+- **Python：** `asyncio` 的取消，超时常用 `wait_for`。
+- **C++20：** `stop_token`。
+- Java 里更常见 `Future.cancel`，或自己传一个 flag。
+
+Go 特别的地方，是几乎处处显式传递 `ctx`，并且把取消、超时和可选值放在同一个接口里，而不是拆成两套工具。
+
+</details>
+
+<details>
+<summary>追问：为啥有这种设计，就是为了能退出吗？</summary>
+
+不止是「能退出」。同一套接口绑了三件事：取消、超时或截止、以及请求级值。调用方说「别干了」，被调方自己查 `Done` 再停，不会像杀线程那样硬掐。
+
+所以设计目标是调用链的生命周期，加上少量元数据，而不只是提供一个退出开关。
+
+</details>
+
+## Background 是什么
+
+`context.Background()` 是一个**空的根 context**：不会被取消、没有 deadline、也没有存 `Value`。整条调用链通常从它（或另一个父 context）往下挂子节点。
+
+`context.TODO()` 也是空根，语义是「暂时不知道该用哪个 context」。能确定时，优先用 `Background`，或调用方传进来的那个父 `ctx`。
+
+<details>
+<summary>复习问答：Background 本质上是什么？</summary>
+
+它是空根，本身不带开关和计时器，但后面所有子 context 都可以挂在它上面。程序入口、初始化、测试里很常见。
+
+```go
+root := context.Background()
+ctx, cancel := context.WithTimeout(root, 3*time.Second)
+defer cancel()
+doWork(ctx) // 把 ctx 一路传下去
+```
+
+</details>
+
+## 逐步执行：先 cancel，再自己退出
+
+<GoDemoEmbed
+  id="context-cancel-demo"
+  src="/demos/go/context-cancel-demo.html"
+  title="context 取消信号逐步执行（交互演示）"
+  hint="点「下一步」或「自动播放」，看 Background → WithCancel → worker 听 Done → cancel 广播停 → defer cancel 兜底。"
+/>
+
+## 和 WaitGroup、channel close 的分工
+
+- **context** 发「停」的信号。
+- **WaitGroup** 等「人退完」。
+- **channel 的 close** 表示这一路生产结束，消费者把剩余值读完。
+
+常见组合是：先 `cancel`，再 `Wait`，让听了 `Done` 的 goroutine 自己退出，然后等计数归零。不要把「关闭某个业务 channel」当成取消整条调用链的手段。
+
+`Done` 该在什么时候看，上一篇之后仍然适用：循环、阻塞 IO、调用下游之前或之中，把 `<-ctx.Done()` 放进 `select`。
+
+## 派生 API 小抄
+
+记名字和一句用途即可。
+
+| API | 作用 |
+|---|---|
+| `Background()` | 空根：不取消、无截止、无值；常作 main / 测试起点 |
+| `TODO()` | 空根占位：「还不确定用哪个 ctx」 |
+| `WithCancel(parent)` | 返回子 ctx 和 `cancel`；手动关闭 `Done` |
+| `WithTimeout(parent, d)` | 时长 `d` 之后自动取消 |
+| `WithDeadline(parent, t)` | 到绝对时间 `t` 之后自动取消 |
+| `WithValue(parent, k, v)` | 挂少量请求级键值，不要当成全局字典 |
+| `Done()` | 返回 channel；取消或超时时被关闭，可放进 `select` |
+| `Err()` | 未取消为 `nil`；否则是 `Canceled` 或 `DeadlineExceeded` |
+| `Value(key)` | 沿父链向上查找 `WithValue` 挂过的值 |
+
+> [!TIP]
+> **对照 JS：** `AbortController.abort()` 会让挂着的 `AbortSignal` 进入 aborted。Go 是关闭 `Done` channel，并且习惯用 `select` 多路等待。Go 还把超时和 `Value` 绑在同一个接口上。
+
+> [!NOTE]
+> **口述 30 秒：** 协作取消加超时加请求级值；根是 Background；子用 WithCancel 或 WithTimeout 派生；自己查 Done。不是杀 goroutine。
+
+## 系列收束
+
+五篇可以串成一条线：
+
+1. [基础对照](/posts/go/01-basics-for-js-devs/)：语言习惯和 JS 的差别。
+2. [接口与 panic](/posts/go/02-interface-nil-panic/)：typed nil、defer、recover。
+3. [channel 与 select](/posts/go/03-goroutine-channel-select/)：握手、有限队列、收尾。
+4. [同步与 GMP](/posts/go/04-waitgroup-mutex-gmp/)：等人、加锁、调度概念。
+5. 本篇：叫停必须协作。
+
+还值得继续亲手加强的，包括 error 的 `%w` 包装、`errors.Is` / `errors.As`，以及 table-driven 测试和 `httptest`。那些不在本系列里写成已经完成的部分。

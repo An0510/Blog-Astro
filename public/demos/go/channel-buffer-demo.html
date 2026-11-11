@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="channel-buffer-demo">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Go Channel：无缓冲 vs 有缓冲</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --danger: #f07178;
+      --slot: #243044;
+      --slot-fill: #2a6f97;
+      --sender: #4c6ef5;
+      --receiver: #12b886;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+    h1 {
+      font-size: 1.45rem;
+      font-weight: 650;
+      margin: 0 0 6px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 20px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .modes {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .mode-btn, .ctrl button {
+      border: 1px solid var(--border);
+      background: #121a26;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .mode-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #041018;
+      font-weight: 600;
+    }
+    .ctrl {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .ctrl button:hover { border-color: var(--accent); }
+    .ctrl button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .stage {
+      display: grid;
+      grid-template-columns: 120px 1fr 120px;
+      gap: 12px;
+      align-items: center;
+      min-height: 180px;
+      margin: 8px 0 12px;
+    }
+    @media (max-width: 640px) {
+      .stage {
+        grid-template-columns: 1fr;
+        justify-items: center;
+      }
+    }
+    .actor {
+      border-radius: 12px;
+      padding: 14px 10px;
+      text-align: center;
+      border: 2px solid transparent;
+      min-height: 110px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      transition: box-shadow .25s, border-color .25s, transform .25s;
+    }
+    .sender { background: rgba(76,110,245,.15); border-color: rgba(76,110,245,.45); }
+    .receiver { background: rgba(18,184,134,.15); border-color: rgba(18,184,134,.45); }
+    .actor.blocking {
+      border-color: var(--danger);
+      box-shadow: 0 0 0 3px rgba(240,113,120,.25);
+      animation: pulse 1s ease-in-out infinite;
+    }
+    .actor.handshake {
+      border-color: var(--ok);
+      box-shadow: 0 0 0 3px rgba(62,207,142,.3);
+      transform: scale(1.03);
+    }
+    .actor .label { font-weight: 650; font-size: 0.95rem; }
+    .actor .status {
+      font-size: 0.8rem;
+      color: var(--muted);
+      min-height: 1.2em;
+    }
+    .actor .status.hot { color: var(--warn); font-weight: 600; }
+    .actor .status.ok { color: var(--ok); font-weight: 600; }
+    .packet {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--warn);
+      color: #1a1200;
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin: 0 auto;
+    }
+    .packet.ghost { opacity: 0.25; background: #555; color: #ccc; }
+    .channel {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 14px 12px;
+      background: #121a26;
+      position: relative;
+      min-height: 120px;
+    }
+    .channel-title {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .slots {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-height: 52px;
+      align-items: center;
+    }
+    .slot {
+      width: 52px;
+      height: 52px;
+      border-radius: 10px;
+      background: var(--slot);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      position: relative;
+      transition: background .25s, transform .25s;
+    }
+    .slot.filled {
+      background: var(--slot-fill);
+      border-color: #3d9cf0;
+      transform: translateY(-2px);
+    }
+    .slot .idx {
+      position: absolute;
+      bottom: -18px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .unbuf-pipe {
+      height: 8px;
+      border-radius: 999px;
+      background: #2a3548;
+      width: 70%;
+      margin: 18px auto 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .unbuf-pipe .flight {
+      position: absolute;
+      top: -14px;
+      left: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--warn);
+      color: #1a1200;
+      font-weight: 700;
+      font-size: 0.75rem;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .unbuf-pipe .flight.show {
+      display: flex;
+      animation: fly 0.55s ease-in-out forwards;
+    }
+    @keyframes fly {
+      from { left: 0; opacity: 1; }
+      to { left: calc(100% - 32px); opacity: 1; }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.72; }
+    }
+    .log {
+      margin-top: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      background: #0c121b;
+      border-radius: 10px;
+      padding: 10px 12px;
+      max-height: 140px;
+      overflow: auto;
+      border: 1px solid var(--border);
+    }
+    .log div { margin: 2px 0; }
+    .log .hi { color: var(--accent); }
+    .log .bad { color: var(--danger); }
+    .log .good { color: var(--ok); }
+    .side h2 {
+      font-size: 1rem;
+      margin: 0 0 10px;
+    }
+    .side h3 {
+      font-size: 0.88rem;
+      margin: 14px 0 6px;
+      color: var(--accent);
+    }
+    .side p, .side li {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .side ul { padding-left: 1.1em; margin: 0; }
+    .side li { margin: 4px 0; }
+    .tip {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(240,180,41,.1);
+      border: 1px solid rgba(240,180,41,.35);
+      color: #f5d78e;
+      font-size: 0.85rem;
+    }
+    .legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .legend .l-send::before { background: var(--sender); }
+    .legend .l-recv::before { background: var(--receiver); }
+    .legend .l-data::before { background: var(--warn); }
+    .legend .l-block::before { background: var(--danger); }
+  </style>
+  <script>
+    if (window.parent !== window) document.documentElement.classList.add("go-demo-is-embed");
+  </script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>Go Channel 动态对比：无缓冲 vs 有缓冲</h1>
+    <p class="sub">点「发送 / 接收」看阻塞与交接；容量 3 的有缓冲像有限货架。</p>
+
+    <div class="layout">
+      <div class="card">
+        <div class="modes">
+          <button class="mode-btn active" id="btnUnbuf" type="button">无缓冲</button>
+          <button class="mode-btn" id="btnBuf" type="button">有缓冲（容量 3）</button>
+        </div>
+
+        <div class="legend">
+          <span class="l-send">发送方</span>
+          <span class="l-recv">接收方</span>
+          <span class="l-data">数据</span>
+          <span class="l-block">阻塞</span>
+        </div>
+
+        <div class="ctrl">
+          <button type="button" id="btnSend">发送一次</button>
+          <button type="button" id="btnRecv">接收一次</button>
+          <button type="button" id="btnReset">重置</button>
+          <button type="button" id="btnAuto">自动演示</button>
+        </div>
+
+        <div class="stage">
+          <div class="actor sender" id="senderBox">
+            <div class="label">发送方</div>
+            <div class="packet ghost" id="senderPkt">?</div>
+            <div class="status" id="senderStatus">空闲</div>
+          </div>
+
+          <div class="channel">
+            <div class="channel-title" id="chanTitle">chan（无缓冲 · 容量 0）</div>
+            <div class="slots" id="slots"></div>
+            <div class="unbuf-pipe" id="pipe" hidden>
+              <div class="flight" id="flight">1</div>
+            </div>
+          </div>
+
+          <div class="actor receiver" id="receiverBox">
+            <div class="label">接收方</div>
+            <div class="packet ghost" id="receiverPkt">?</div>
+            <div class="status" id="receiverStatus">空闲</div>
+          </div>
+        </div>
+
+        <div class="log" id="log" aria-live="polite"></div>
+      </div>
+
+      <aside class="card side">
+        <h2>什么时候用？</h2>
+        <h3>无缓冲 <code>make(chan T)</code></h3>
+        <ul>
+          <li>强同步：发送和接收必须「握手」同时完成</li>
+          <li>确认对方已经收到</li>
+          <li>传递所有权 / 发信号（通知）</li>
+        </ul>
+        <h3>有缓冲 <code>make(chan T, 3)</code></h3>
+        <ul>
+          <li>削峰填谷：生产者偶尔比消费者快</li>
+          <li>两边速率不同，减少互相干等</li>
+          <li>注意：别当无限队列；满了仍会阻塞</li>
+        </ul>
+        <div class="tip" id="modeTip">
+          当前：无缓冲。发送方举起数据时，必须有接收方伸手接，谁先到谁等。
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const CAP_BUF = 3;
+      let mode = "unbuf"; // unbuf | buf
+      let queue = []; // buffered values
+      let nextVal = 1;
+      let sendBlocked = false;
+      let recvBlocked = false;
+      let pendingSend = null; // value waiting on unbuffered / full buffer
+      let pendingRecv = false;
+      let busy = false;
+      let autoTimer = null;
+      let autoStep = 0;
+
+      const el = (id) => document.getElementById(id);
+      const logEl = el("log");
+      const slotsEl = el("slots");
+      const senderBox = el("senderBox");
+      const receiverBox = el("receiverBox");
+      const senderStatus = el("senderStatus");
+      const receiverStatus = el("receiverStatus");
+      const senderPkt = el("senderPkt");
+      const receiverPkt = el("receiverPkt");
+      const chanTitle = el("chanTitle");
+      const pipe = el("pipe");
+      const flight = el("flight");
+      const modeTip = el("modeTip");
+
+      function log(msg, cls) {
+        const d = document.createElement("div");
+        if (cls) d.className = cls;
+        d.textContent = msg;
+        logEl.prepend(d);
+      }
+
+      function setBusy(v) {
+        busy = v;
+        el("btnSend").disabled = v;
+        el("btnRecv").disabled = v;
+        if (!autoTimer) el("btnAuto").disabled = v;
+      }
+
+      function renderSlots() {
+        slotsEl.innerHTML = "";
+        if (mode === "unbuf") {
+          pipe.hidden = false;
+          const empty = document.createElement("div");
+          empty.style.color = "var(--muted)";
+          empty.style.fontSize = "0.85rem";
+          empty.textContent = sendBlocked || recvBlocked
+            ? "等待握手（无货架，必须两边同时就绪）"
+            : "容量 0 · 无法暂存，必须发送/接收碰面";
+          slotsEl.appendChild(empty);
+          return;
+        }
+        pipe.hidden = true;
+        for (let i = 0; i < CAP_BUF; i++) {
+          const s = document.createElement("div");
+          s.className = "slot" + (queue[i] !== undefined ? " filled" : "");
+          s.textContent = queue[i] !== undefined ? String(queue[i]) : "";
+          const idx = document.createElement("span");
+          idx.className = "idx";
+          idx.textContent = "槽" + i;
+          s.appendChild(idx);
+          slotsEl.appendChild(s);
+        }
+      }
+
+      function updateActors() {
+        senderBox.classList.toggle("blocking", sendBlocked);
+        receiverBox.classList.toggle("blocking", recvBlocked);
+
+        if (sendBlocked) {
+          senderStatus.textContent = "阻塞 · 等待接收";
+          senderStatus.className = "status hot";
+          senderPkt.className = "packet";
+          senderPkt.textContent = String(pendingSend);
+        } else {
+          senderStatus.textContent = "空闲";
+          senderStatus.className = "status";
+          senderPkt.className = "packet ghost";
+          senderPkt.textContent = "?";
+        }
+
+        if (recvBlocked) {
+          receiverStatus.textContent = "阻塞 · 等待发送";
+          receiverStatus.className = "status hot";
+          receiverPkt.className = "packet ghost";
+          receiverPkt.textContent = "?";
+        } else {
+          receiverStatus.textContent = "空闲";
+          receiverStatus.className = "status";
+        }
+      }
+
+      function flashHandshake(val) {
+        senderBox.classList.add("handshake");
+        receiverBox.classList.add("handshake");
+        receiverPkt.className = "packet";
+        receiverPkt.textContent = String(val);
+        receiverStatus.textContent = "收到 " + val;
+        receiverStatus.className = "status ok";
+        setTimeout(() => {
+          senderBox.classList.remove("handshake");
+          receiverBox.classList.remove("handshake");
+        }, 500);
+      }
+
+      function resetState(silent) {
+        stopAuto();
+        queue = [];
+        nextVal = 1;
+        sendBlocked = false;
+        recvBlocked = false;
+        pendingSend = null;
+        pendingRecv = false;
+        flight.classList.remove("show");
+        if (!silent) {
+          logEl.innerHTML = "";
+          log("已重置", "hi");
+        }
+        renderSlots();
+        updateActors();
+        setBusy(false);
+      }
+
+      function setMode(m) {
+        mode = m;
+        el("btnUnbuf").classList.toggle("active", m === "unbuf");
+        el("btnBuf").classList.toggle("active", m === "buf");
+        chanTitle.textContent = m === "unbuf"
+          ? "chan（无缓冲 · 容量 0）"
+          : "chan（有缓冲 · 容量 3）";
+        modeTip.textContent = m === "unbuf"
+          ? "当前：无缓冲。发送方举起数据时，必须有接收方伸手接，谁先到谁等。"
+          : "当前：有缓冲。货架有空位就能先放下；装满后再发才会阻塞。接收会腾出空位。";
+        resetState(true);
+        log(m === "unbuf" ? "切换到无缓冲模式" : "切换到有缓冲（容量 3）", "hi");
+      }
+
+      function tryCompleteUnbuf() {
+        if (sendBlocked && recvBlocked && pendingSend !== null) {
+          const val = pendingSend;
+          sendBlocked = false;
+          recvBlocked = false;
+          pendingSend = null;
+          pendingRecv = false;
+          setBusy(true);
+          flight.textContent = String(val);
+          flight.classList.remove("show");
+          void flight.offsetWidth;
+          flight.classList.add("show");
+          log("握手成功：传递 " + val, "good");
+          setTimeout(() => {
+            flight.classList.remove("show");
+            flashHandshake(val);
+            updateActors();
+            renderSlots();
+            setBusy(false);
+          }, 560);
+          return true;
+        }
+        return false;
+      }
+
+      function doSend() {
+        if (busy) return;
+        const val = nextVal;
+
+        if (mode === "unbuf") {
+          if (sendBlocked) {
+            log("发送方已在阻塞中，先接收或重置", "bad");
+            return;
+          }
+          pendingSend = val;
+          nextVal += 1;
+          sendBlocked = true;
+          log("ch <- " + val + "  → 发送阻塞（等接收方）", "bad");
+          updateActors();
+          renderSlots();
+          tryCompleteUnbuf();
+          return;
+        }
+
+        // buffered
+        if (sendBlocked) {
+          log("缓冲已满，发送方仍阻塞", "bad");
+          return;
+        }
+        if (queue.length < CAP_BUF) {
+          queue.push(val);
+          nextVal += 1;
+          log("ch <- " + val + "  → 放入槽位（不阻塞）容量 " + queue.length + "/" + CAP_BUF, "good");
+          // if receiver was waiting, deliver immediately from buffer
+          if (recvBlocked) {
+            const got = queue.shift();
+            recvBlocked = false;
+            pendingRecv = false;
+            log("接收方正在等 → 立刻拿到 " + got, "good");
+            flashHandshake(got);
+          }
+          renderSlots();
+          updateActors();
+          return;
+        }
+        // full → block
+        pendingSend = val;
+        nextVal += 1;
+        sendBlocked = true;
+        log("ch <- " + val + "  → 缓冲已满，发送阻塞", "bad");
+        updateActors();
+        renderSlots();
+      }
+
+      function doRecv() {
+        if (busy) return;
+
+        if (mode === "unbuf") {
+          if (recvBlocked) {
+            log("接收方已在阻塞中", "bad");
+            return;
+          }
+          recvBlocked = true;
+          pendingRecv = true;
+          log("<-ch  → 接收阻塞（等发送方）", "bad");
+          updateActors();
+          renderSlots();
+          tryCompleteUnbuf();
+          return;
+        }
+
+        // buffered
+        if (recvBlocked) {
+          log("接收方已在阻塞中", "bad");
+          return;
+        }
+        if (queue.length > 0) {
+          const got = queue.shift();
+          log("<-ch  → 取出 " + got + "（剩余 " + queue.length + "/" + CAP_BUF + "）", "good");
+          // unblock pending sender if any
+          if (sendBlocked && pendingSend !== null) {
+            queue.push(pendingSend);
+            log("发送方解除阻塞，放入 " + pendingSend, "good");
+            pendingSend = null;
+            sendBlocked = false;
+          }
+          flashHandshake(got);
+          renderSlots();
+          updateActors();
+          return;
+        }
+        // empty → if sender blocked with pending, take it (shouldn't happen with buf empty+pending simultaneously often)
+        if (sendBlocked && pendingSend !== null) {
+          // buffer full case: receive frees one, pending send enters
+          // but queue empty here means nothing to take unless we accept pending directly
+        }
+        recvBlocked = true;
+        pendingRecv = true;
+        log("<-ch  → 缓冲为空，接收阻塞", "bad");
+        // if somehow send is also blocked with value and buffer empty — take handshake like unbuf
+        if (sendBlocked && pendingSend !== null && queue.length === 0) {
+          // shouldn't normally: full buffer means queue length 3
+        }
+        updateActors();
+        renderSlots();
+      }
+
+      // When buffer is full and sender blocked, receive should: shift one out, then enqueue pendingSend
+      // Already handled in buffered branch when queue.length > 0.
+      // Fix edge: receive while empty and sender blocked shouldn't happen for capacity>0 unless bug.
+      // Also: if recv blocked and then send into non-full buffer — handled in doSend.
+
+      // Improve doRecv for full+blocked sender already OK.
+      // When recv blocked and send fills — handled.
+
+      // Unblock recv when send into empty buffer while recv waiting — handled in doSend.
+
+      function stopAuto() {
+        if (autoTimer) {
+          clearTimeout(autoTimer);
+          autoTimer = null;
+        }
+        el("btnAuto").textContent = "自动演示";
+        autoStep = 0;
+      }
+
+      function schedule(fn, ms) {
+        autoTimer = setTimeout(fn, ms);
+      }
+
+      function runAuto() {
+        if (autoTimer) {
+          stopAuto();
+          log("停止自动演示", "hi");
+          return;
+        }
+        resetState(true);
+        log("开始自动演示…", "hi");
+        el("btnAuto").textContent = "停止演示";
+
+        const stepsUnbuf = [
+          () => { log("① 先发送：无人接收 → 阻塞", "hi"); doSend(); },
+          () => { log("② 再接收：握手完成", "hi"); doRecv(); },
+          () => { log("③ 先接收：无人发送 → 阻塞", "hi"); doRecv(); },
+          () => { log("④ 再发送：握手完成", "hi"); doSend(); },
+        ];
+        const stepsBuf = [
+          () => { log("① 连续发送 3 次，填满货架", "hi"); doSend(); },
+          () => { doSend(); },
+          () => { doSend(); },
+          () => { log("② 第 4 次发送 → 阻塞", "hi"); doSend(); },
+          () => { log("③ 接收一次 → 腾出空位，发送方解除阻塞", "hi"); doRecv(); },
+          () => { doRecv(); },
+          () => { doRecv(); },
+          () => { doRecv(); },
+        ];
+
+        const steps = mode === "unbuf" ? stepsUnbuf : stepsBuf;
+        let i = 0;
+
+        function next() {
+          if (i >= steps.length) {
+            log("自动演示结束", "good");
+            stopAuto();
+            return;
+          }
+          const waitBusy = () => {
+            if (busy) {
+              schedule(waitBusy, 80);
+              return;
+            }
+            steps[i++]();
+            schedule(next, 900);
+          };
+          waitBusy();
+        }
+        next();
+      }
+
+      el("btnUnbuf").addEventListener("click", () => setMode("unbuf"));
+      el("btnBuf").addEventListener("click", () => setMode("buf"));
+      el("btnSend").addEventListener("click", doSend);
+      el("btnRecv").addEventListener("click", doRecv);
+      el("btnReset").addEventListener("click", () => resetState(false));
+      el("btnAuto").addEventListener("click", runAuto);
+
+      setMode("unbuf");
+    })();
+  </script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>

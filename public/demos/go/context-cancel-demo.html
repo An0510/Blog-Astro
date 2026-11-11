@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="context-cancel-demo">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>context 取消信号执行演示</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --danger: #f07178;
+      --main: #4c6ef5;
+      --worker: #12b886;
+      --ctx: #9775fa;
+      --done: #e64980;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 20px 56px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 650;
+      margin: 0 0 6px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 18px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .ctrl {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .ctrl button {
+      border: 1px solid var(--border);
+      background: #121a26;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .ctrl button:hover { border-color: var(--accent); }
+    .ctrl button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .ctrl button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #041018;
+      font-weight: 600;
+    }
+    .step-label {
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .step-label strong { color: var(--accent); }
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr 1fr;
+      gap: 14px;
+      align-items: stretch;
+      min-height: 300px;
+    }
+    @media (max-width: 700px) {
+      .stage { grid-template-columns: 1fr; }
+    }
+    .col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .actor {
+      border-radius: 12px;
+      padding: 12px 10px;
+      border: 2px solid transparent;
+      min-height: 72px;
+      transition: box-shadow .25s, border-color .25s, transform .2s, background .25s, opacity .25s;
+      background: #121a26;
+    }
+    .actor.active {
+      box-shadow: 0 0 0 2px rgba(61,156,240,.35);
+      transform: translateY(-1px);
+    }
+    .actor.done-state {
+      opacity: 0.72;
+      border-color: rgba(62,207,142,.45);
+    }
+    .actor.cancelled {
+      border-color: rgba(240,113,120,.55);
+      background: rgba(240,113,120,.1);
+    }
+    .actor .name {
+      font-weight: 650;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+    .actor .status {
+      font-size: 0.82rem;
+      color: var(--muted);
+      min-height: 2.4em;
+    }
+    .main { border-color: rgba(76,110,245,.45); background: rgba(76,110,245,.12); }
+    .worker { border-color: rgba(18,184,134,.45); background: rgba(18,184,134,.1); }
+    .ctx-panel {
+      border: 2px dashed rgba(151,117,250,.7);
+      border-radius: 14px;
+      padding: 14px 12px;
+      background: rgba(151,117,250,.1);
+      min-height: 220px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ctx-panel h3 {
+      margin: 0;
+      font-size: 0.95rem;
+      color: #d0bfff;
+      text-align: center;
+    }
+    .tree {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      background: #0d1219;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      white-space: pre-line;
+      line-height: 1.45;
+    }
+    .tree .hi { color: #d0bfff; font-weight: 650; }
+    .tree .ok { color: var(--ok); }
+    .tree .bad { color: var(--danger); }
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: center;
+    }
+    .pill {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #121a26;
+      color: var(--muted);
+      transition: all .25s;
+    }
+    .pill.on {
+      border-color: var(--ok);
+      color: var(--ok);
+      background: rgba(62,207,142,.12);
+    }
+    .pill.off {
+      border-color: var(--danger);
+      color: var(--danger);
+      background: rgba(240,113,120,.12);
+    }
+    .done-pipe {
+      margin-top: 4px;
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+      border: 1px solid var(--border);
+      background: #0d1219;
+      font-size: 0.85rem;
+      transition: all .3s;
+    }
+    .done-pipe.open {
+      border-color: rgba(230,73,128,.6);
+      background: rgba(230,73,128,.15);
+      color: #ffa8b5;
+      box-shadow: 0 0 16px rgba(230,73,128,.25);
+    }
+    .done-pipe.closed {
+      color: var(--muted);
+    }
+    .signal {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      background: rgba(230,73,128,.2);
+      color: #ffa8b5;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: all .3s;
+    }
+    .signal.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      background: #0d1219;
+      border-radius: 10px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      overflow-x: auto;
+      white-space: pre;
+      margin: 0 0 12px;
+    }
+    .code .hl {
+      background: rgba(61,156,240,.22);
+      outline: 1px solid rgba(61,156,240,.35);
+      border-radius: 4px;
+    }
+    .log {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      max-height: 220px;
+      overflow: auto;
+      background: #0d1219;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid var(--border);
+    }
+    .log div { margin-bottom: 4px; color: var(--muted); }
+    .log div.now { color: var(--ok); }
+    .aside h2 {
+      font-size: 1rem;
+      margin: 0 0 10px;
+    }
+    .aside p, .aside li {
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    .aside ul { padding-left: 1.1em; margin: 0 0 12px; }
+    .aside code {
+      font-size: 0.82em;
+      background: #121a26;
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #c5d4eb;
+    }
+    .kw {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .kw span {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: #121a26;
+      border: 1px solid var(--border);
+      color: #b8c7de;
+    }
+    .scenario {
+      margin-top: 18px;
+    }
+    .scenario h2 {
+      font-size: 1.05rem;
+      margin: 0 0 10px;
+    }
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 700px) {
+      .scenario-grid { grid-template-columns: 1fr; }
+    }
+    .scenario .card h3 {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      color: var(--accent);
+    }
+    .flow {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .flow strong { color: var(--text); }
+  </style>
+  <script>
+    if (window.parent !== window) document.documentElement.classList.add("go-demo-is-embed");
+  </script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>context 取消：一步步看清楚</h1>
+    <p class="sub">对应代码：<code>WithCancel</code> → worker 听 <code>ctx.Done()</code> → <code>cancel()</code> 广播停 → <code>defer cancel()</code> 兜底</p>
+
+    <div class="layout">
+      <div>
+        <div class="card">
+          <div class="ctrl">
+            <button type="button" class="primary" id="btnNext">下一步</button>
+            <button type="button" id="btnAuto">自动播放</button>
+            <button type="button" id="btnReset">重置</button>
+          </div>
+          <div class="step-label">步骤 <strong id="stepNum">0</strong> / <span id="stepTotal">0</span> · <span id="stepTitle">准备</span></div>
+
+          <pre class="code" id="codeBlock"></pre>
+
+          <div class="stage">
+            <div class="col">
+              <div class="actor main" id="mainBox">
+                <div class="name">main（父 goroutine）</div>
+                <div class="status" id="mainStatus">就绪</div>
+              </div>
+              <div class="actor" id="bgBox" style="border-color:rgba(151,117,250,.35);background:rgba(151,117,250,.08)">
+                <div class="name">context.Background()</div>
+                <div class="status" id="bgStatus">根 context（不会被取消）</div>
+              </div>
+            </div>
+
+            <div class="ctx-panel" id="ctxPanel">
+              <h3>派生 context 树</h3>
+              <div class="tree" id="ctxTree">Background
+└─ （尚未 WithCancel）</div>
+              <div class="pill-row">
+                <span class="pill" id="pillCtx">ctx 未创建</span>
+                <span class="pill" id="pillCancel">cancel 未拿到</span>
+              </div>
+              <div class="done-pipe closed" id="donePipe">
+                ctx.Done() 通道
+                <div id="doneState">尚未关闭 · 没人收到取消</div>
+                <span class="signal" id="signal">取消信号 →</span>
+              </div>
+            </div>
+
+            <div class="col">
+              <div class="actor worker" id="workerBox">
+                <div class="name">worker goroutine</div>
+                <div class="status" id="workerStatus">尚未启动</div>
+              </div>
+              <div class="actor" id="selectBox" style="border-color:rgba(240,180,41,.4);background:rgba(240,180,41,.08)">
+                <div class="name">select 循环</div>
+                <div class="status" id="selectStatus">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <div style="font-size:0.9rem;margin-bottom:8px;color:var(--muted)">执行日志</div>
+          <div class="log" id="log"></div>
+        </div>
+      </div>
+
+      <aside class="aside card">
+        <h2>关键字对照</h2>
+        <ul>
+          <li><code>context.Background()</code>：根上下文，程序起点常用它当父。</li>
+          <li><code>WithCancel(parent)</code>：派生出子 <code>ctx</code> + <code>cancel</code> 函数。</li>
+          <li><code>cancel()</code>：关闭该 ctx 的 <code>Done</code>，通知所有监听者。</li>
+          <li><code>&lt;-ctx.Done()</code>：收到取消/超时就可读。</li>
+          <li><code>select</code>：同时听 Done 和干活分支。</li>
+          <li><code>defer cancel()</code>：main 返回前再 cancel 一次，防泄漏（多次调用安全）。</li>
+        </ul>
+        <div class="kw">
+          <span>Background</span>
+          <span>WithCancel</span>
+          <span>cancel</span>
+          <span>ctx.Done</span>
+          <span>select</span>
+          <span>defer</span>
+        </div>
+        <h2 style="margin-top:16px">和 WaitGroup 分工</h2>
+        <p><code>context</code> = 发「停」的信号；<code>WaitGroup</code> = 等「人退完」。常一起用：先 cancel，再 Wait。</p>
+      </aside>
+    </div>
+
+    <section class="scenario">
+      <h2>实际场景扩充</h2>
+      <div class="scenario-grid">
+        <div class="card">
+          <h3>① HTTP 请求超时</h3>
+          <p class="flow">网关给每个请求挂 <code>context.WithTimeout</code>。超时后自动 <strong>cancel</strong>，下游查库 / 调 RPC 的 goroutine 在 <code>select</code> 里听到 <code>ctx.Done()</code> 就停，避免请求已断开还白干活。</p>
+        </div>
+        <div class="card">
+          <h3>② 用户取消上传</h3>
+          <p class="flow">用户点「取消」→ 调用 <strong>cancel()</strong> → 上传 worker、<strong>分片校验</strong> 等子 goroutine 都听同一个 <code>ctx</code>，一起退出；父函数里的 <code>defer cancel()</code> 保证异常路径也会关掉。</p>
+        </div>
+        <div class="card">
+          <h3>③ 父任务取消一串子任务</h3>
+          <p class="flow">一个订单处理拆成「风控 / 库存 / 通知」多个 worker，共用派生 <code>ctx</code>。风控失败就 <strong>cancel</strong>，其余还没做完的直接收工，而不是各跑各的。</p>
+        </div>
+        <div class="card">
+          <h3>④ 对照本页示例代码</h3>
+          <p class="flow"><code>Background</code> → <code>WithCancel</code> 得到可取消的孩子；worker 在 <code>default</code> 里假装干活，同时盯着 <code>Done</code>；main 调 <code>cancel()</code> = 广播停工；<code>defer cancel()</code> = 离开前再确认关干净。</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const codeLines = [
+      'ctx, cancel := context.WithCancel(context.Background())',
+      'defer cancel()',
+      'go func() {',
+      '  for {',
+      '    select {',
+      '    case <-ctx.Done():',
+      '      return',
+      '    default:',
+      '      // 干活…',
+      '    }',
+      '  }',
+      '}()',
+      'cancel() // 通知所有听 ctx 的人停',
+    ];
+
+    const steps = [
+      {
+        title: '初始：只有 Background 根',
+        highlight: [],
+        apply(s) {
+          s.main = '准备创建可取消的 context';
+          s.bg = '根 context（不会被取消）';
+          s.worker = '尚未启动';
+          s.select = '—';
+          s.tree = 'Background\n└─ （尚未 WithCancel）';
+          s.pillCtx = { text: 'ctx 未创建', cls: '' };
+          s.pillCancel = { text: 'cancel 未拿到', cls: '' };
+          s.done = { open: false, text: '尚未关闭 · 没人收到取消' };
+          s.signal = false;
+          s.active = ['bgBox'];
+          s.log = '程序开始：只有 context.Background() 这棵树的根';
+        }
+      },
+      {
+        title: 'WithCancel：派生 ctx + cancel',
+        highlight: [0],
+        apply(s) {
+          s.main = '拿到 ctx 和 cancel 函数';
+          s.bg = '作为 parent 传给 WithCancel';
+          s.tree = 'Background\n└─ ctx  ← 派生出来的可取消孩子\n     Done: 开着（未取消）';
+          s.pillCtx = { text: 'ctx 已创建', cls: 'on' };
+          s.pillCancel = { text: 'cancel 已拿到', cls: 'on' };
+          s.done = { open: false, text: 'Done 通道开着 · 等待 cancel' };
+          s.active = ['mainBox', 'ctxPanel', 'bgBox'];
+          s.log = 'context.WithCancel(Background) → 返回 (ctx, cancel)';
+        }
+      },
+      {
+        title: 'defer cancel()：登记兜底',
+        highlight: [1],
+        apply(s) {
+          s.main = '登记：main 返回前再调一次 cancel（防泄漏）';
+          s.active = ['mainBox'];
+          s.log = 'defer cancel()：不是现在取消，是函数结束前一定再 cancel 一次';
+        }
+      },
+      {
+        title: '启动 worker goroutine',
+        highlight: [2, 11],
+        apply(s) {
+          s.worker = '已启动 · 进入 for + select 循环';
+          s.select = '同时听：Done / default 干活';
+          s.active = ['workerBox', 'selectBox'];
+          s.log = 'go func(){ ... }()：worker 开始跑，main 继续往下';
+        }
+      },
+      {
+        title: 'select → default：假装干活',
+        highlight: [7, 8],
+        apply(s) {
+          s.worker = 'default 分支 · 正在干活…';
+          s.select = 'Done 还没关闭 → 走 default';
+          s.done = { open: false, text: 'Done 仍开着 · worker 继续转' };
+          s.active = ['workerBox', 'selectBox'];
+          s.log = '没取消时：select 常走到 default，循环干活';
+        }
+      },
+      {
+        title: '再转一圈：仍在干活',
+        highlight: [3, 4, 7, 8],
+        apply(s) {
+          s.worker = '又干了一轮（循环中）';
+          s.select = 'for { select { … } } 还在转';
+          s.active = ['workerBox'];
+          s.log = '只要不 cancel，worker 可以一直 default 干活';
+        }
+      },
+      {
+        title: 'main 调用 cancel()',
+        highlight: [12],
+        apply(s) {
+          s.main = '调用 cancel() → 关闭 ctx.Done()';
+          s.pillCancel = { text: 'cancel() 已调用', cls: 'off' };
+          s.pillCtx = { text: 'ctx 已取消', cls: 'off' };
+          s.tree = 'Background\n└─ ctx  ← 已取消\n     Done: 已关闭 ✓';
+          s.done = { open: true, text: 'Done 已关闭 · 取消信号发出' };
+          s.signal = true;
+          s.active = ['mainBox', 'ctxPanel', 'donePipe'];
+          s.log = 'cancel()：关闭 Done 通道，所有 <-ctx.Done() 都会立刻可读';
+        }
+      },
+      {
+        title: 'worker 听到 ctx.Done()',
+        highlight: [5, 6],
+        apply(s) {
+          s.worker = 'select 命中 case <-ctx.Done()';
+          s.select = '不再走 default · 准备 return';
+          s.signal = true;
+          s.done = { open: true, text: '信号已被 worker 收到' };
+          s.active = ['workerBox', 'selectBox', 'donePipe'];
+          s.workerClass = 'cancelled';
+          s.log = 'worker 从 Done 读到取消 → 执行 return 退出循环';
+        }
+      },
+      {
+        title: 'worker 退出',
+        highlight: [6],
+        apply(s) {
+          s.worker = '已 return · goroutine 结束';
+          s.select = '循环结束';
+          s.workerClass = 'done-state';
+          s.active = ['workerBox'];
+          s.log = '子 goroutine 干净退出（实际业务里常再配合 WaitGroup.Wait）';
+        }
+      },
+      {
+        title: 'defer cancel() 再跑一次（安全）',
+        highlight: [1],
+        apply(s) {
+          s.main = 'main 结束前 defer 再 cancel（重复调用无害）';
+          s.active = ['mainBox'];
+          s.mainClass = 'done-state';
+          s.log = 'defer cancel() 兜底：即使前面忘了手动 cancel，也不会泄漏；已取消则空操作';
+        }
+      },
+    ];
+
+    const els = {
+      stepNum: document.getElementById('stepNum'),
+      stepTotal: document.getElementById('stepTotal'),
+      stepTitle: document.getElementById('stepTitle'),
+      codeBlock: document.getElementById('codeBlock'),
+      mainStatus: document.getElementById('mainStatus'),
+      bgStatus: document.getElementById('bgStatus'),
+      workerStatus: document.getElementById('workerStatus'),
+      selectStatus: document.getElementById('selectStatus'),
+      ctxTree: document.getElementById('ctxTree'),
+      pillCtx: document.getElementById('pillCtx'),
+      pillCancel: document.getElementById('pillCancel'),
+      donePipe: document.getElementById('donePipe'),
+      doneState: document.getElementById('doneState'),
+      signal: document.getElementById('signal'),
+      log: document.getElementById('log'),
+      btnNext: document.getElementById('btnNext'),
+      btnAuto: document.getElementById('btnAuto'),
+      btnReset: document.getElementById('btnReset'),
+      mainBox: document.getElementById('mainBox'),
+      bgBox: document.getElementById('bgBox'),
+      workerBox: document.getElementById('workerBox'),
+      selectBox: document.getElementById('selectBox'),
+      ctxPanel: document.getElementById('ctxPanel'),
+    };
+
+    let idx = -1;
+    let autoTimer = null;
+    const logs = [];
+
+    function renderCode(highlight) {
+      const set = new Set(highlight || []);
+      els.codeBlock.innerHTML = codeLines.map((line, i) => {
+        const safe = line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        return set.has(i) ? `<span class="hl">${safe}</span>` : safe;
+      }).join('\n');
+    }
+
+    function clearActive() {
+      ['mainBox','bgBox','workerBox','selectBox','ctxPanel'].forEach(id => {
+        const el = document.getElementById(id);
+        el.classList.remove('active', 'done-state', 'cancelled');
+      });
+      // restore base classes
+      els.mainBox.classList.add('main');
+      els.workerBox.classList.add('worker');
+    }
+
+    function applyState(partial, highlight, title) {
+      clearActive();
+      const s = {
+        main: els.mainStatus.textContent,
+        bg: els.bgStatus.textContent,
+        worker: els.workerStatus.textContent,
+        select: els.selectStatus.textContent,
+        tree: els.ctxTree.textContent,
+        pillCtx: { text: els.pillCtx.textContent, cls: '' },
+        pillCancel: { text: els.pillCancel.textContent, cls: '' },
+        done: { open: els.donePipe.classList.contains('open'), text: els.doneState.textContent },
+        signal: false,
+        active: [],
+        workerClass: '',
+        mainClass: '',
+        log: '',
+      };
+      partial(s);
+
+      els.mainStatus.textContent = s.main;
+      els.bgStatus.textContent = s.bg;
+      els.workerStatus.textContent = s.worker;
+      els.selectStatus.textContent = s.select;
+      els.ctxTree.innerHTML = s.tree
+        .replace(/Background/g, '<span class="hi">Background</span>')
+        .replace(/已取消/g, '<span class="bad">已取消</span>')
+        .replace(/✓/g, '<span class="ok">✓</span>');
+
+      els.pillCtx.textContent = s.pillCtx.text;
+      els.pillCtx.className = 'pill ' + (s.pillCtx.cls || '');
+      els.pillCancel.textContent = s.pillCancel.text;
+      els.pillCancel.className = 'pill ' + (s.pillCancel.cls || '');
+
+      els.donePipe.classList.toggle('open', !!s.done.open);
+      els.donePipe.classList.toggle('closed', !s.done.open);
+      els.doneState.textContent = s.done.text;
+      els.signal.classList.toggle('show', !!s.signal);
+
+      (s.active || []).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('active');
+      });
+      if (s.workerClass) els.workerBox.classList.add(s.workerClass);
+      if (s.mainClass) els.mainBox.classList.add(s.mainClass);
+
+      renderCode(highlight);
+      els.stepTitle.textContent = title;
+      if (s.log) {
+        logs.push(s.log);
+        els.log.innerHTML = logs.map((l, i) =>
+          `<div class="${i === logs.length - 1 ? 'now' : ''}">${i + 1}. ${l}</div>`
+        ).join('');
+        els.log.scrollTop = els.log.scrollHeight;
+      }
+    }
+
+    function goTo(n) {
+      if (n < 0 || n >= steps.length) return;
+      idx = n;
+      els.stepNum.textContent = String(idx + 1);
+      const step = steps[idx];
+      applyState(step.apply, step.highlight, step.title);
+      els.btnNext.disabled = idx >= steps.length - 1;
+    }
+
+    function next() {
+      if (idx < steps.length - 1) goTo(idx + 1);
+      else stopAuto();
+    }
+
+    function reset() {
+      stopAuto();
+      logs.length = 0;
+      els.log.innerHTML = '';
+      idx = -1;
+      els.btnNext.disabled = false;
+      goTo(0);
+    }
+
+    function stopAuto() {
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+      els.btnAuto.textContent = '自动播放';
+    }
+
+    function toggleAuto() {
+      if (autoTimer) {
+        stopAuto();
+        return;
+      }
+      els.btnAuto.textContent = '暂停';
+      if (idx >= steps.length - 1) goTo(0);
+      autoTimer = setInterval(() => {
+        if (idx >= steps.length - 1) {
+          stopAuto();
+          return;
+        }
+        next();
+      }, 1600);
+    }
+
+    els.stepTotal.textContent = String(steps.length);
+    els.btnNext.addEventListener('click', next);
+    els.btnReset.addEventListener('click', reset);
+    els.btnAuto.addEventListener('click', toggleAuto);
+    reset();
+  </script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>

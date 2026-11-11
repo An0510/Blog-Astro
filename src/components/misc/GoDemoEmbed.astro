@@ -1,0 +1,68 @@
+---
+interface Props {
+	src: string;
+	title: string;
+	hint?: string;
+	id?: string;
+}
+
+const { src, title, hint, id } = Astro.props;
+const demoId = id ?? (src.split("/").pop()?.replace(/\.html$/i, "") ?? "demo");
+---
+
+<figure class="go-demo-embed" data-go-demo-root>
+	<figcaption class="go-demo-embed__title">{title}</figcaption>
+	{
+		hint && (
+			<p class="go-demo-embed__hint">{hint}</p>
+		)
+	}
+	<iframe
+		class="go-demo-embed__frame"
+		data-go-demo-iframe
+		data-go-demo-id={demoId}
+		src={src}
+		title={title}
+		sandbox="allow-scripts"
+		width="100%"
+		height="360"
+	></iframe>
+	<p class="go-demo-embed__link">
+		<a href={src}>单独打开这个演示</a>
+	</p>
+</figure>
+
+<style>
+	.go-demo-embed {
+		margin: 1.25rem 0 1.5rem;
+		padding: 0;
+		max-width: 100%;
+	}
+	.go-demo-embed__title {
+		margin: 0 0 0.4rem;
+		font-weight: 650;
+		font-size: 1.02rem;
+		color: var(--primary, inherit);
+	}
+	.go-demo-embed__hint {
+		margin: 0 0 0.75rem;
+		font-size: 0.92rem;
+		line-height: 1.6;
+		color: var(--tw-prose-body, inherit);
+		opacity: 0.86;
+	}
+	.go-demo-embed__frame {
+		display: block;
+		width: 100%;
+		max-width: 100%;
+		min-height: 0;
+		height: 360px;
+		border: 1px solid var(--line-divider, #d0d7de);
+		border-radius: 12px;
+		background: #0f1419;
+	}
+	.go-demo-embed__link {
+		margin: 0.55rem 0 0;
+		font-size: 0.9rem;
+	}
+</style>

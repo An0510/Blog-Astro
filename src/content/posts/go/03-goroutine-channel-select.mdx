@@ -1,0 +1,174 @@
+---
+title: "goroutine、channel、select 与 worker 池"
+published: 2026-11-11
+description: "goroutine 是轻量并发单元；无缓冲 channel 是握手，有缓冲 channel 是有限队列。再看 close、range、select、死锁，以及多人抢同一条 jobs 的 worker 池。"
+tags: ["Go", "并发", "channel"]
+category: "Go"
+series: "Go 复习笔记"
+seriesOrder: 3
+---
+
+import GoDemoEmbed from "@/components/misc/GoDemoEmbed.astro";
+
+这是「Go 复习笔记」第三篇，从[接口和 panic](/posts/go/02-interface-nil-panic/) 转到并发原语。同步原语和 GMP 在[下一篇](/posts/go/04-waitgroup-mutex-gmp/)；请求级取消在[context 篇](/posts/go/05-context-cancellation/)。
+
+## goroutine
+
+`go f()` 会启动一个用户态的轻量并发单元，也就是 **goroutine**。它不是「启动一个就立刻新开一条 OS 线程」——调度模型（GMP）下一篇再看概念。
+
+`main` 本身也是一个 goroutine。**`main` 函数结束，整个进程就退出**，不会自动等其他 goroutine 跑完。谁调用 `time.Sleep`，就只暂停谁。`Sleep` 只适合演示时临时等一下，正式代码改用 `WaitGroup` 或其他同步方式。
+
+```go
+go work("A")
+go work("B")
+work("main")
+time.Sleep(500 * time.Millisecond) // 演示用；正式应用改用 WaitGroup
+```
+
+## channel：无缓冲是握手，有缓冲是有限队列
+
+`chan` 是管道类型。创建 slice、map、channel 都用 `make`，不是只有 channel 才用它。
+
+- **无缓冲** `make(chan T)`：发送和接收必须**握手**，同时完成。谁先到谁等。适合确认对方已经收到，或传递所有权、发信号。
+- **有缓冲** `make(chan T, n)`：像容量为 `n` 的有限队列，可以先暂存。两边速率不同时，能减少互相干等。它**不是无限队列**；货架满了，发送方照样会阻塞。
+
+可以按演示步骤来记：
+
+1. 无缓冲时先发送、无人接收 → 发送方阻塞；再有人接收 → 握手完成。反过来，先接收也会阻塞，直到有人发送。
+2. 有缓冲、容量为 3 时，连续发送 3 次可以先填满；第 4 次发送会阻塞；接收一次腾出空位，发送方才能继续。
+
+<GoDemoEmbed
+  id="channel-buffer-demo"
+  src="/demos/go/channel-buffer-demo.html"
+  title="Go Channel：无缓冲 vs 有缓冲（交互演示）"
+  hint="点「发送一次 / 接收一次」看谁先到谁等；也可以切到有缓冲（容量 3），连续发送直到货架满。"
+/>
+
+```go
+ch := make(chan string)  // 无缓冲
+ch2 := make(chan int, 2) // 缓冲 2
+ch2 <- 1
+ch2 <- 2
+// ch2 <- 3  // 已经满了，如果同一个 goroutine 里又没有人来收，可能死锁
+
+msg := <-ch // 这才是接收；Println 本身不会从 channel 里取值
+```
+
+**阻塞不是报错。** 只有大家都在等别人、谁也推进不了时，才是死锁，运行时会 panic。典型例子：`main` 往已经满的缓冲 channel、或无缓冲 channel 发送，同时又没有别的 goroutine 来接收。
+
+## close、range，以及 nil channel
+
+`close(ch)` 表示「不会再发送了」，让接收方可以收尾；**不是**手动释放内存。`for v := range ch` 会一直接收，直到 channel 被关闭并且里面的值取完。
+
+和本篇范围相关的规则，写准确一些：
+
+- 对**已关闭**的 channel **发送**会 panic；**接收**还可以，读完剩余值之后得到零值，`ok` 为 `false`。
+- **重复 close** 会 panic。通常只由发送方 close，接收方不要关。
+- 对 **`nil` channel** 发送或接收会**永远阻塞**；`close(nil)` 会 panic。
+- 多个接收者都可以感知到 close，所以 close 带有广播「生产结束」的语义。但请求级取消不要靠乱关业务 channel，那是 [context](/posts/go/05-context-cancellation/) 的工作。
+
+```go
+close(jobs) // 表示不再发送
+for j := range jobs {
+	// 收到关闭并且取完才结束
+}
+```
+
+<details>
+<summary>追问：close 收尾和 context 取消怎么分工？</summary>
+
+**队列收尾：** 生产者 `close`，消费者 `range` 读完退出。
+
+**请求取消：** 调用方 `cancel`，整条调用链协作停下。
+
+两者常常一起用，但不要混成「靠 close 取消所有人」。
+
+</details>
+
+## worker 池：多人抢同一条 jobs
+
+多个 worker **分着抢**任务，不是各做一遍。每个任务只会被一个 worker 取走。任务很少、又结束得很快时，看起来会像串行。
+
+```go
+func worker(id int, jobs <-chan int, results chan<- int) {
+	for j := range jobs {
+		time.Sleep(200 * time.Millisecond)
+		results <- j * j // 平方用 *；^ 在 Go 里是按位异或
+	}
+}
+
+jobs, results := make(chan int, 6), make(chan int, 6)
+go worker(1, jobs, results)
+go worker(2, jobs, results)
+go worker(3, jobs, results)
+for j := 1; j <= 6; j++ {
+	jobs <- j
+}
+close(jobs)
+for i := 0; i < 6; i++ {
+	fmt.Println(<-results)
+}
+```
+
+有一个很适合建立直觉的例子：3 个 worker 监听同一条**无缓冲**的 `jobs`，但只发送 1 个任务，然后 `close(jobs)`。
+
+1. 三个 worker 都进入 `for range jobs`，此时还没有值、也还没 close，于是都在**阻塞接收**——只卡住各自的 goroutine，还不是死锁。
+2. `jobs <- 1` 只能和其中一个接收配对。只有一个人拿到任务，另外两个继续等。真实调度下谁抢到并不固定。
+3. 处理完的那个 worker 会再次进入 `range` 等待。此时还没有人 `Done`（如果配合了 WaitGroup，计数仍然是 3）。
+4. `close(jobs)` 之后，缓冲区里也没有残留值，三个 `range` 全部结束。**没抢到任务的 worker 也会因 close 而正常退出**，这就是优雅收工。
+
+> [!NOTE]
+> 固定「发 N 个、收 N 个」时，通常用不上 `select`。`select` 是下一节这种「同时等几件事」才需要的。
+
+## select：多路等待
+
+`select` 同时等多个 channel，谁先就绪走谁。几个 case 同时就绪时，Go 会公平地选一个，而不是按源代码从上到下固定优先。常和 `time.After`、以及后文的 `ctx.Done()` 一起用。
+
+```go
+select {
+case msg := <-ch1:
+	fmt.Println(msg)
+case msg := <-ch2:
+	fmt.Println(msg)
+case <-time.After(300 * time.Millisecond):
+	fmt.Println("超时")
+}
+```
+
+`go func(){ ... }()` 就是定义一个匿名函数并立刻用 `go` 跑起来。演示里的 `Sleep` 常常只是在模拟不同耗时。
+
+<details>
+<summary>追问：看取消信号时，Done 什么时候该看？</summary>
+
+循环、阻塞 IO、调用下游之前或之中，用 `select` 同时听业务和取消：
+
+```go
+select {
+case v := <-jobs:
+	handle(v)
+case <-ctx.Done():
+	return ctx.Err()
+}
+```
+
+`cancel` 之后，`Done` 对应的 channel 会关闭，接收方向立刻可读，`select` 就能走进取消分支。
+
+</details>
+
+<details>
+<summary>追问：select 里为啥没写 chan 类型？</summary>
+
+`ctx.Done()` 返回的就是 `<-chan struct{}`，类型已经在 API 里定死。`select` 只关心「哪个 case 就绪」。
+
+</details>
+
+> [!NOTE]
+> **口述 30 秒：** goroutine 很轻；channel 既同步又通信；select 做多路等待；close 负责收尾，请求级取消用 context。
+
+## 这一篇先记住
+
+- `main` 结束，进程就退出，不会自动等其他 goroutine。
+- 无缓冲 channel 是握手；有缓冲是有限队列，满了仍会阻塞。
+- close 表示生产结束，可配合 `range` 收尾；不要对已关闭的 channel 发送，也不要 close 两次。
+- worker 池是抢同一条队列，不是每人一份。
+- 取消和收尾是两件事，下一篇讲完 WaitGroup 之后，[context 篇](/posts/go/05-context-cancellation/)会把取消讲完。

@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="gmp-scheduler-demo">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Go GMP 调度器动画演示</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2332;
+    --panel-border: #2d3a4f;
+    --text: #e7ecf3;
+    --muted: #8b9bb4;
+    --g: #3dd68c;
+    --g-dim: #1e6b4a;
+    --g-run: #5eead4;
+    --g-block: #f59e0b;
+    --p: #60a5fa;
+    --p-bg: #1e3a5f;
+    --m: #c084fc;
+    --m-bg: #3b2760;
+    --cpu: #f472b6;
+    --cpu-bg: #5b2148;
+    --steal: #fb7185;
+    --global: #94a3b8;
+    --accent: #38bdf8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "SF Pro Text", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px 24px 32px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 16px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+  .stage-wrap {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 16px;
+    min-height: 520px;
+  }
+  .caption {
+    background: #121a24;
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    min-height: 64px;
+  }
+  .caption .step-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(56, 189, 248, 0.12);
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-bottom: 6px;
+  }
+  .caption p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  button {
+    appearance: none;
+    border: 1px solid var(--panel-border);
+    background: #243044;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 560;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  }
+  button:hover { background: #2c3b52; border-color: #4a5d7a; }
+  button:active { transform: scale(0.97); }
+  button.primary {
+    background: #0c4a6e;
+    border-color: #0284c7;
+    color: #e0f2fe;
+  }
+  button.primary:hover { background: #075985; }
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .progress {
+    flex: 1;
+    min-width: 120px;
+    height: 6px;
+    background: #243044;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress > i {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #0284c7, #22d3ee);
+    border-radius: 999px;
+    transition: width 0.35s ease;
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: 150px 1fr 160px 120px;
+    gap: 12px;
+    align-items: stretch;
+    min-height: 380px;
+  }
+  .col {
+    background: #121a24;
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 12px;
+    position: relative;
+  }
+  .col h2 {
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--muted);
+    text-transform: none;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .col h2 .kw {
+    color: var(--text);
+    font-size: 13px;
+  }
+  .pool {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 300px;
+  }
+  .g-chip {
+    width: 100%;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--g-dim);
+    border: 1.5px solid var(--g);
+    color: #d1fae5;
+    font-size: 12px;
+    font-weight: 650;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.35s ease,
+      background 0.3s,
+      border-color 0.3s,
+      box-shadow 0.3s;
+    opacity: 0;
+    transform: translateY(8px) scale(0.92);
+  }
+  .g-chip.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  .g-chip.running {
+    background: #0f766e;
+    border-color: var(--g-run);
+    color: #ccfbf1;
+    box-shadow: 0 0 0 3px rgba(94, 234, 212, 0.25), 0 0 18px rgba(94, 234, 212, 0.35);
+  }
+  .g-chip.blocked {
+    background: #78350f;
+    border-color: var(--g-block);
+    color: #fef3c7;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+    animation: pulse-block 1.2s ease-in-out infinite;
+  }
+  .g-chip.stolen {
+    border-color: var(--steal);
+    box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.25);
+  }
+  .g-chip.hidden-slot {
+    opacity: 0;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    pointer-events: none;
+  }
+  @keyframes pulse-block {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  .p-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .p-box {
+    background: var(--p-bg);
+    border: 1.5px solid var(--p);
+    border-radius: 10px;
+    padding: 10px;
+    transition: box-shadow 0.3s, border-color 0.3s;
+  }
+  .p-box.active {
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
+  }
+  .p-title {
+    font-size: 12px;
+    font-weight: 650;
+    color: #bfdbfe;
+    margin-bottom: 8px;
+  }
+  .run-queue {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    min-height: 44px;
+  }
+  .slot {
+    height: 40px;
+    border-radius: 7px;
+    border: 1.5px dashed #3b82f6;
+    background: rgba(30, 58, 95, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: #93c5fd;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .slot.filled {
+    border-style: solid;
+    padding: 0;
+    overflow: hidden;
+  }
+  .slot .g-chip {
+    height: 100%;
+    border-radius: 6px;
+    border-width: 0;
+  }
+  .running-slot {
+    margin-top: 8px;
+    height: 44px;
+    border-radius: 8px;
+    border: 1.5px solid #67e8f9;
+    background: rgba(15, 118, 110, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: #a5f3fc;
+    position: relative;
+  }
+  .running-slot::before {
+    content: "Running";
+    position: absolute;
+    top: -9px;
+    left: 8px;
+    font-size: 9px;
+    background: var(--p-bg);
+    padding: 0 4px;
+    color: #67e8f9;
+  }
+  .running-slot.has-g {
+    padding: 2px;
+  }
+  .m-stack, .cpu-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    justify-content: space-around;
+    min-height: 300px;
+  }
+  .m-box {
+    background: var(--m-bg);
+    border: 1.5px solid var(--m);
+    border-radius: 10px;
+    padding: 14px 10px;
+    text-align: center;
+    transition: box-shadow 0.3s, transform 0.35s;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .m-box.active {
+    box-shadow: 0 0 0 3px rgba(192, 132, 252, 0.3);
+  }
+  .m-box.idle {
+    opacity: 0.55;
+  }
+  .m-label {
+    font-size: 13px;
+    font-weight: 650;
+    color: #e9d5ff;
+  }
+  .m-bind {
+    font-size: 11px;
+    color: #c4b5fd;
+  }
+  .bind-line {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .cpu-box {
+    background: var(--cpu-bg);
+    border: 1.5px solid var(--cpu);
+    border-radius: 10px;
+    padding: 18px 10px;
+    text-align: center;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: box-shadow 0.3s;
+  }
+  .cpu-box.busy {
+    box-shadow: 0 0 16px rgba(244, 114, 182, 0.35);
+  }
+  .cpu-label {
+    font-size: 13px;
+    font-weight: 650;
+    color: #fbcfe8;
+  }
+  .cpu-status {
+    font-size: 11px;
+    color: #f9a8d4;
+  }
+  .global-queue {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #334155;
+  }
+  .global-queue .label {
+    font-size: 11px;
+    color: var(--global);
+    margin-bottom: 6px;
+  }
+  .gq-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 36px;
+  }
+  .gq-row .g-chip {
+    width: 52px;
+    height: 32px;
+    font-size: 11px;
+  }
+  .steal-banner {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.9);
+    background: rgba(251, 113, 133, 0.95);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 10px 16px;
+    border-radius: 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s, transform 0.35s;
+    z-index: 5;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .steal-banner.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .legend, .tips {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .legend h3, .tips h3 {
+    font-size: 13px;
+    margin-bottom: 10px;
+    color: var(--text);
+  }
+  .legend-item {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+    align-items: flex-start;
+  }
+  .swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    flex-shrink: 0;
+    border: 1.5px solid;
+  }
+  .swatch.g { background: var(--g-dim); border-color: var(--g); }
+  .swatch.p { background: var(--p-bg); border-color: var(--p); }
+  .swatch.m { background: var(--m-bg); border-color: var(--m); }
+  .swatch.cpu { background: var(--cpu-bg); border-color: var(--cpu); }
+  .legend-item strong {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+  .legend-item span {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+  .tips ul {
+    padding-left: 16px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .tips li { margin-bottom: 6px; }
+  .arrow-hint {
+    text-align: center;
+    font-size: 11px;
+    color: var(--muted);
+    margin: 6px 0 0;
+  }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    .stage { grid-template-columns: 1fr 1.4fr; }
+    .col.m-col, .col.cpu-col { grid-column: span 1; }
+  }
+</style>
+  <script>
+    if (window.parent !== window) document.documentElement.classList.add("go-demo-is-embed");
+  </script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="layout">
+    <div>
+      <h1>Go GMP 调度器 · 动画演示</h1>
+      <p class="subtitle">面向有 JS 基础的同学：G = 任务单，P = 工位管理员，M = OS 线程，CPU = 真核</p>
+
+      <div class="stage-wrap">
+        <div class="caption">
+          <div class="step-tag" id="stepTag">步骤 0 / 5</div>
+          <p id="captionText">点「播放」或「下一步」开始：看 goroutine 如何被 P 调度到 M 上跑。</p>
+        </div>
+
+        <div class="controls">
+          <button type="button" id="btnPrev">上一步</button>
+          <button type="button" class="primary" id="btnPlay">播放</button>
+          <button type="button" id="btnPause">暂停</button>
+          <button type="button" id="btnNext">下一步</button>
+          <button type="button" id="btnReset">重置</button>
+          <div class="progress" title="进度"><i id="progressBar"></i></div>
+        </div>
+
+        <div class="stage" id="stage">
+          <!-- G pool -->
+          <div class="col">
+            <h2><span class="kw">G</span> · Goroutine 池</h2>
+            <div class="pool" id="gPool"></div>
+            <div class="global-queue">
+              <div class="label">Global Queue（全局队列）</div>
+              <div class="gq-row" id="globalQueue"></div>
+            </div>
+          </div>
+
+          <!-- P -->
+          <div class="col" style="position:relative">
+            <h2><span class="kw">P</span> · Processor（逻辑处理器）</h2>
+            <div class="steal-banner" id="stealBanner">Work Stealing：从全局 / 别的 P 偷任务</div>
+            <div class="p-stack">
+              <div class="p-box" id="p0">
+                <div class="p-title">P0 · Local Run Queue</div>
+                <div class="run-queue" id="p0Queue"></div>
+                <div class="running-slot" id="p0Run">空闲</div>
+              </div>
+              <div class="p-box" id="p1">
+                <div class="p-title">P1 · Local Run Queue</div>
+                <div class="run-queue" id="p1Queue"></div>
+                <div class="running-slot" id="p1Run">空闲</div>
+              </div>
+            </div>
+            <p class="arrow-hint">← 本地队列 · 当前 Running →</p>
+          </div>
+
+          <!-- M -->
+          <div class="col m-col">
+            <h2><span class="kw">M</span> · Machine（OS 线程）</h2>
+            <div class="m-stack">
+              <div class="m-box idle" id="m0">
+                <div class="m-label">M0</div>
+                <div class="m-bind" id="m0Bind">未绑定</div>
+                <div class="bind-line">执行 P 选中的 G</div>
+              </div>
+              <div class="m-box idle" id="m1">
+                <div class="m-label">M1</div>
+                <div class="m-bind" id="m1Bind">未绑定</div>
+                <div class="bind-line">执行 P 选中的 G</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CPU -->
+          <div class="col cpu-col">
+            <h2>CPU 核</h2>
+            <div class="cpu-stack">
+              <div class="cpu-box" id="cpu0">
+                <div class="cpu-label">Core 0</div>
+                <div class="cpu-status" id="cpu0Status">idle</div>
+              </div>
+              <div class="cpu-box" id="cpu1">
+                <div class="cpu-label">Core 1</div>
+                <div class="cpu-status" id="cpu1Status">idle</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="legend">
+        <h3>图例 · Legend</h3>
+        <div class="legend-item">
+          <div class="swatch g"></div>
+          <div>
+            <strong>G · Goroutine</strong>
+            <span>用户态轻量任务（像很多小任务单）。栈很小，由 Go runtime 调度，不是一 G 一 OS 线程。</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="swatch p"></div>
+          <div>
+            <strong>P · Processor</strong>
+            <span>逻辑处理器：手里有本地可运行队列。GOMAXPROCS 大致决定 P 的数量。</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="swatch m"></div>
+          <div>
+            <strong>M · Machine</strong>
+            <span>真正的 OS 线程。必须绑定一个 P 才能跑 Go 代码；G 跑在「M+P」上。</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="swatch cpu"></div>
+          <div>
+            <strong>CPU Core</strong>
+            <span>硬件核。M 最终在某个核上执行机器指令。</span>
+          </div>
+        </div>
+      </div>
+      <div class="tips">
+        <h3>对照直觉（JS）</h3>
+        <ul>
+          <li>浏览器常是单线程事件循环；Go 用多个 M 真正并行。</li>
+          <li><code>go f()</code> ≈ 丢一张新任务单 G 进队列，不是立刻新开 OS 线程。</li>
+          <li>channel / 阻塞系统调用时，G 可卸下，M/P 换别的 G 继续干。</li>
+          <li>本地队列空了 → 从 Global Queue 拿，或 Work Stealing 偷别的 P 的一半。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const STEPS = [
+    {
+      title: "步骤 1 / 5 · 创建大量 G",
+      caption: "程序里写了很多 go f()：运行时创建一批 Goroutine（G），放入各 P 的本地队列；装不下的进 Global Queue。此时还没开始跑。",
+    },
+    {
+      title: "步骤 2 / 5 · P0 选 G 绑到 M0",
+      caption: "P0 从本地队列取出一个 G，放到 Running；M0 绑定 P0，在 CPU Core 0 上执行该 G（高亮 = 正在跑）。",
+    },
+    {
+      title: "步骤 3 / 5 · 另一边并行",
+      caption: "P1 / M1 / Core 1 同时跑另一个 G。这就是「多路复用」：多个 G 并行落在少量 M/CPU 上（对照 JS：这里是真并行，不是只靠事件循环）。",
+    },
+    {
+      title: "步骤 4 / 5 · G 阻塞，换人上",
+      caption: "G2 阻塞（例如等 channel / 系统调用风格）：从 Running 卸下并标成 Blocked。P0+M0 立刻从本地队列再取 G3 继续跑——协程卡住 ≠ 整条 OS 线程永远闲置。",
+    },
+    {
+      title: "步骤 5 / 5 · Work Stealing / 全局补货",
+      caption: "某 P 本地队列空了：先看 Global Queue，再 Work Stealing（偷其他 P 队列约一半）。保证大家有活干，避免一核忙死、一核空转。",
+    },
+  ];
+
+  const els = {
+    stepTag: document.getElementById("stepTag"),
+    captionText: document.getElementById("captionText"),
+    progressBar: document.getElementById("progressBar"),
+    gPool: document.getElementById("gPool"),
+    globalQueue: document.getElementById("globalQueue"),
+    p0: document.getElementById("p0"),
+    p1: document.getElementById("p1"),
+    p0Queue: document.getElementById("p0Queue"),
+    p1Queue: document.getElementById("p1Queue"),
+    p0Run: document.getElementById("p0Run"),
+    p1Run: document.getElementById("p1Run"),
+    m0: document.getElementById("m0"),
+    m1: document.getElementById("m1"),
+    m0Bind: document.getElementById("m0Bind"),
+    m1Bind: document.getElementById("m1Bind"),
+    cpu0: document.getElementById("cpu0"),
+    cpu1: document.getElementById("cpu1"),
+    cpu0Status: document.getElementById("cpu0Status"),
+    cpu1Status: document.getElementById("cpu1Status"),
+    stealBanner: document.getElementById("stealBanner"),
+    btnPrev: document.getElementById("btnPrev"),
+    btnNext: document.getElementById("btnNext"),
+    btnPlay: document.getElementById("btnPlay"),
+    btnPause: document.getElementById("btnPause"),
+    btnReset: document.getElementById("btnReset"),
+  };
+
+  let step = -1;
+  let playing = false;
+  let timer = null;
+  const AUTO_MS = 2800;
+
+  function chip(id, extraClass) {
+    const d = document.createElement("div");
+    d.className = "g-chip" + (extraClass ? " " + extraClass : "");
+    d.dataset.id = id;
+    d.textContent = id;
+    return d;
+  }
+
+  function clearNode(n) {
+    while (n.firstChild) n.removeChild(n.firstChild);
+  }
+
+  function makeSlots(container, n) {
+    clearNode(container);
+    for (let i = 0; i < n; i++) {
+      const s = document.createElement("div");
+      s.className = "slot";
+      s.textContent = "空";
+      container.appendChild(s);
+    }
+  }
+
+  function fillSlot(slot, gId, cls) {
+    slot.classList.add("filled");
+    slot.textContent = "";
+    const c = chip(gId, "visible " + (cls || ""));
+    slot.appendChild(c);
+  }
+
+  function emptySlot(slot) {
+    slot.classList.remove("filled");
+    slot.textContent = "空";
+  }
+
+  function setRunning(runEl, gId, blocked) {
+    if (!gId) {
+      runEl.classList.remove("has-g");
+      runEl.textContent = "空闲";
+      return;
+    }
+    runEl.classList.add("has-g");
+    runEl.textContent = "";
+    const c = chip(gId, "visible " + (blocked ? "blocked" : "running"));
+    runEl.appendChild(c);
+  }
+
+  function resetVisualBase() {
+    clearNode(els.gPool);
+    clearNode(els.globalQueue);
+    makeSlots(els.p0Queue, 3);
+    makeSlots(els.p1Queue, 3);
+    setRunning(els.p0Run, null);
+    setRunning(els.p1Run, null);
+    els.p0.classList.remove("active");
+    els.p1.classList.remove("active");
+    els.m0.classList.add("idle");
+    els.m1.classList.add("idle");
+    els.m0.classList.remove("active");
+    els.m1.classList.remove("active");
+    els.m0Bind.textContent = "未绑定";
+    els.m1Bind.textContent = "未绑定";
+    els.cpu0.classList.remove("busy");
+    els.cpu1.classList.remove("busy");
+    els.cpu0Status.textContent = "idle";
+    els.cpu1Status.textContent = "idle";
+    els.stealBanner.classList.remove("show");
+  }
+
+  function bindMP(mEl, bindEl, cpuEl, cpuStatus, pName, gName, active) {
+    if (active) {
+      mEl.classList.remove("idle");
+      mEl.classList.add("active");
+      bindEl.textContent = "绑定 " + pName + (gName ? " · 跑 " + gName : "");
+      cpuEl.classList.add("busy");
+      cpuStatus.textContent = gName ? "执行 " + gName : "busy";
+    } else {
+      mEl.classList.add("idle");
+      mEl.classList.remove("active");
+      bindEl.textContent = "未绑定";
+      cpuEl.classList.remove("busy");
+      cpuStatus.textContent = "idle";
+    }
+  }
+
+  function applyStep(n) {
+    resetVisualBase();
+    step = n;
+
+    if (n < 0) {
+      els.stepTag.textContent = "步骤 0 / 5";
+      els.captionText.textContent = "点「播放」或「下一步」开始：看 goroutine 如何被 P 调度到 M 上跑。";
+      els.progressBar.style.width = "0%";
+      updateButtons();
+      return;
+    }
+
+    const meta = STEPS[n];
+    els.stepTag.textContent = meta.title;
+    els.captionText.textContent = meta.caption;
+    els.progressBar.style.width = ((n + 1) / STEPS.length) * 100 + "%";
+
+    // Shared: leftover pool labels
+    const poolIds = ["G6", "G7"];
+    poolIds.forEach(function (id, i) {
+      const c = chip(id);
+      els.gPool.appendChild(c);
+      requestAnimationFrame(function () {
+        setTimeout(function () { c.classList.add("visible"); }, 40 * i);
+      });
+    });
+
+    if (n === 0) {
+      // Fill local queues + global
+      fillSlot(els.p0Queue.children[0], "G1");
+      fillSlot(els.p0Queue.children[1], "G2");
+      fillSlot(els.p0Queue.children[2], "G3");
+      fillSlot(els.p1Queue.children[0], "G4");
+      fillSlot(els.p1Queue.children[1], "G5");
+      ["G8", "G9"].forEach(function (id, i) {
+        const c = chip(id);
+        els.globalQueue.appendChild(c);
+        setTimeout(function () { c.classList.add("visible"); }, 80 + 50 * i);
+      });
+      els.p0.classList.add("active");
+      els.p1.classList.add("active");
+    }
+
+    if (n === 1) {
+      // P0 running G1; queue G2 G3; P1 still queued
+      fillSlot(els.p0Queue.children[0], "G2");
+      fillSlot(els.p0Queue.children[1], "G3");
+      fillSlot(els.p1Queue.children[0], "G4");
+      fillSlot(els.p1Queue.children[1], "G5");
+      ["G8", "G9"].forEach(function (id) {
+        const c = chip(id, "visible");
+        els.globalQueue.appendChild(c);
+      });
+      setRunning(els.p0Run, "G1", false);
+      els.p0.classList.add("active");
+      bindMP(els.m0, els.m0Bind, els.cpu0, els.cpu0Status, "P0", "G1", true);
+    }
+
+    if (n === 2) {
+      fillSlot(els.p0Queue.children[0], "G2");
+      fillSlot(els.p0Queue.children[1], "G3");
+      fillSlot(els.p1Queue.children[0], "G5");
+      ["G8", "G9"].forEach(function (id) {
+        const c = chip(id, "visible");
+        els.globalQueue.appendChild(c);
+      });
+      setRunning(els.p0Run, "G1", false);
+      setRunning(els.p1Run, "G4", false);
+      els.p0.classList.add("active");
+      els.p1.classList.add("active");
+      bindMP(els.m0, els.m0Bind, els.cpu0, els.cpu0Status, "P0", "G1", true);
+      bindMP(els.m1, els.m1Bind, els.cpu1, els.cpu1Status, "P1", "G4", true);
+    }
+
+    if (n === 3) {
+      // G1 done-ish / G2 blocked shown on side; G3 running on P0; P1 still G4
+      fillSlot(els.p0Queue.children[0], "G1"); // finished-ish waiting? show blocked G2 in pool area note
+      // Show blocked G2 in gPool prominently
+      clearNode(els.gPool);
+      const blocked = chip("G2", "visible blocked");
+      els.gPool.appendChild(blocked);
+      const note = chip("G6");
+      els.gPool.appendChild(note);
+      setTimeout(function () { note.classList.add("visible"); }, 30);
+
+      fillSlot(els.p1Queue.children[0], "G5");
+      ["G8", "G9"].forEach(function (id) {
+        const c = chip(id, "visible");
+        els.globalQueue.appendChild(c);
+      });
+      // G2 was running then blocked — show blocked briefly in running then swap to G3
+      setRunning(els.p0Run, "G3", false);
+      setRunning(els.p1Run, "G4", false);
+      els.p0.classList.add("active");
+      els.p1.classList.add("active");
+      bindMP(els.m0, els.m0Bind, els.cpu0, els.cpu0Status, "P0", "G3", true);
+      bindMP(els.m1, els.m1Bind, els.cpu1, els.cpu1Status, "P1", "G4", true);
+
+      // Animate: flash blocked then replaced — already show G2 blocked in pool
+      // Also put a small blocked indicator text under p0
+      const hint = document.createElement("div");
+      hint.style.cssText = "font-size:11px;color:#fbbf24;margin-top:6px;text-align:center";
+      hint.textContent = "G2 已 Blocked（等 channel）→ 换成 G3";
+      els.p0.appendChild(hint);
+    }
+
+    if (n === 4) {
+      // P1 queue empty, steal from global / P0
+      fillSlot(els.p0Queue.children[0], "G1");
+      // P1 gets stolen G8, G9 from global
+      fillSlot(els.p1Queue.children[0], "G8", "stolen");
+      fillSlot(els.p1Queue.children[1], "G9", "stolen");
+      // global nearly empty, maybe one left then taken
+      setRunning(els.p0Run, "G3", false);
+      setRunning(els.p1Run, "G5", false);
+      els.p0.classList.add("active");
+      els.p1.classList.add("active");
+      bindMP(els.m0, els.m0Bind, els.cpu0, els.cpu0Status, "P0", "G3", true);
+      bindMP(els.m1, els.m1Bind, els.cpu1, els.cpu1Status, "P1", "G5", true);
+      els.stealBanner.classList.add("show");
+      setTimeout(function () {
+        els.stealBanner.classList.remove("show");
+      }, 2200);
+
+      clearNode(els.gPool);
+      const blocked = chip("G2", "visible blocked");
+      els.gPool.appendChild(blocked);
+      const g7 = chip("G7");
+      els.gPool.appendChild(g7);
+      setTimeout(function () { g7.classList.add("visible"); }, 40);
+    }
+
+    updateButtons();
+  }
+
+  function updateButtons() {
+    els.btnPrev.disabled = step <= -1;
+    els.btnNext.disabled = step >= STEPS.length - 1;
+    els.btnPause.disabled = !playing;
+    els.btnPlay.textContent = playing ? "播放中…" : (step >= STEPS.length - 1 ? "重播" : "播放");
+  }
+
+  function next() {
+    if (step >= STEPS.length - 1) {
+      pause();
+      return;
+    }
+    applyStep(step + 1);
+  }
+
+  function prev() {
+    pause();
+    applyStep(Math.max(-1, step - 1));
+  }
+
+  function play() {
+    if (step >= STEPS.length - 1) {
+      applyStep(-1);
+    }
+    playing = true;
+    updateButtons();
+    if (step < 0) next();
+    clearInterval(timer);
+    timer = setInterval(function () {
+      if (step >= STEPS.length - 1) {
+        pause();
+        return;
+      }
+      next();
+    }, AUTO_MS);
+  }
+
+  function pause() {
+    playing = false;
+    clearInterval(timer);
+    timer = null;
+    updateButtons();
+  }
+
+  function reset() {
+    pause();
+    applyStep(-1);
+  }
+
+  els.btnNext.addEventListener("click", function () { pause(); next(); });
+  els.btnPrev.addEventListener("click", prev);
+  els.btnPlay.addEventListener("click", play);
+  els.btnPause.addEventListener("click", pause);
+  els.btnReset.addEventListener("click", reset);
+
+  applyStep(-1);
+})();
+</script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>

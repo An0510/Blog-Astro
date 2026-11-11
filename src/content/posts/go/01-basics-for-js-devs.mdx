@@ -1,0 +1,221 @@
+---
+title: "给 JS 开发者的 Go 基础：变量、切片、struct 和指针"
+published: 2026-11-11
+description: "按 JavaScript 的直觉对照 Go：package 入口、变量与零值、for、error 返回值、数组和切片、map、struct、指针与方法。这是「Go 复习笔记」系列第一篇。"
+tags: ["Go", "基础"]
+category: "Go"
+series: "Go 复习笔记"
+seriesOrder: 1
+---
+
+这是系列「Go 复习笔记」的第一篇，写给已经熟悉 JavaScript / 前端的读者。后面四篇分别是：[接口与 nil、panic](/posts/go/02-interface-nil-panic/)、[goroutine 与 channel](/posts/go/03-goroutine-channel-select/)、[WaitGroup、锁与 GMP](/posts/go/04-waitgroup-mutex-gmp/)、[context 协作取消](/posts/go/05-context-cancellation/)。
+
+文中的代码是为讲解整理过的教学示例。对照时会保留 Go 的专业名词，不把比喻单独留下来。
+
+## 入口：package、import、main
+
+可执行程序的入口必须是 `package main`，并且有 `func main()`。没有默认导出对象，代码靠包名组织。
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("你好, Go")
+}
+```
+
+同一个目录里如果有多个 `main` 文件，不能用 `go run .` 一次编过去，要指定文件，例如 `go run ./某文件.go`。
+
+> [!TIP]
+> **对照 JS：** 有点像项目的入口脚本；差别是 Go 没有 `export default`，而是用 `package` 划分命名空间。
+
+## 变量：var、短声明、const
+
+`:=` 只能在函数里做短声明并推断类型；包级变量用 `var`。`const` 是编译期常量。
+
+```go
+var name string = "安南"
+age := 18 // 推断为 int
+const Pi = 3.14
+```
+
+## 零值与类型转换
+
+声明了但还没赋值时，变量会得到**零值**：`int` 是 `0`，`string` 是 `""`，`bool` 是 `false`；指针、切片、map、channel、函数、接口的零值可以是 `nil`。`nil` 不是数字 `0`，也不是空字符串。
+
+类型转换必须显式写出来：
+
+```go
+var n int
+var s string
+fmt.Println(n, s) // 0 和空字符串
+
+var x int = 3
+var y float64 = float64(x) // 必须显式转换
+```
+
+## if 与 for
+
+Go 没有 `while`。`for` 这一个关键字覆盖了经典三段式、条件循环和无限循环。条件外面不用括号，必须有花括号。`if` 可以带一条短声明，作用域只在这条 `if` / `else` 里。
+
+```go
+if x := 10; x > 5 {
+	fmt.Println("大于 5")
+}
+
+for i := 0; i < 3; i++ { /* 经典 for */ }
+for i < 10 { /* 相当于 while */ }
+for { /* 无限循环 */ break }
+```
+
+## 函数、多返回值、error
+
+习惯返回 `(结果, error)`。`nil` 在这里表示「没有错误」。不需要的返回值用 `_` 丢掉。
+
+```go
+func div(a, b int) (int, error) {
+	if b == 0 {
+		return 0, fmt.Errorf("除零")
+	}
+	return a / b, nil
+}
+
+v, err := div(10, 2)
+if err != nil {
+	fmt.Println(err)
+	return
+}
+fmt.Println(v)
+```
+
+> [!TIP]
+> **对照 JS：** 主路径不是靠 `throw` 往上抛，而是调用方显式检查 `err`。`error` 是值，后面讲接口和包装时会再碰到。
+
+## 数组、切片、append
+
+`[3]int` 是固定长度的**类型**；`[3]int{1, 2, 3}` 是**复合字面量**（边写类型边填内容）。切片 `[]int` 更像日常使用的「窗口」：指向底层数组，再加上 `len` 和 `cap`。
+
+```go
+var arr [3]int = [3]int{1, 2, 3} // 冗余写法
+arr2 := [3]int{1, 2, 3}         // 更常见
+
+s := []int{1, 2, 3}
+s = append(s, 4)
+part := s[0:2] // 含头不含尾；默认共用底层数组
+```
+
+> [!WARNING]
+> **易错：** Go 切片默认**共享底层数组**，改 `part` 可能改到 `s`。这和 Python 切片常常拷贝一份不同。JS 的 `Array` 更接近 Go 的切片，而不是固定长度数组。
+
+## map
+
+键值表，键的类型在声明时写死。读不到的键会得到值类型的零值，所以常用 `v, ok` 判断键是否存在。**`nil` map 不能写**，需要字面量或 `make` 之后再赋值。
+
+```go
+m := map[string]int{"apple": 3}
+m["orange"] = 2
+v, ok := m["apple"]
+delete(m, "apple")
+// 或 m := make(map[string]int)
+```
+
+> [!TIP]
+> **对照 JS：** 更像 `Map`（或 Python 的 `dict`），不是可以随便加点的普通对象。
+
+## struct：形状固定，默认拷贝
+
+字段在编译期就定好了，不能运行时随便加属性。赋值默认**拷贝整份值**。要共享同一份数据，用指针。
+
+```go
+type Person struct {
+	Name string
+	Age  int
+}
+
+p := Person{Name: "安南", Age: 18}
+p.Age = 19
+```
+
+> [!TIP]
+> **对照 JS：** 看起来像对象，但形状是定死的，默认按值拷贝，不是默认按引用共享。
+
+## 指针：传值还是传指针
+
+`&x` 取地址；`*T` 是「指向 T 的指针」类型；`*ptr` 解引用。这是语法，不是命名规范。
+
+**传值会拷贝，传指针才共享同一份。** 并不是「传结构体就只能用指针」——只是你想改外面那一份，或者避免拷贝大结构体时，才传指针。
+
+```go
+func birthdayByValue(p Person) { p.Age++ }    // 外面不变
+func birthdayByPointer(p *Person) { p.Age++ } // 外面一起变
+
+a := Person{Name: "安南", Age: 18}
+birthdayByValue(a)    // 仍是 18
+birthdayByPointer(&a) // 变成 19
+ptr := &a
+fmt.Println(ptr.Name) // 自动解引用
+```
+
+## 方法与接收者
+
+Go 没有 `class`：先定义类型，再在外面挂方法。`(p Person)` / `(p *Person)` 是**接收者**，类似方法里的 `this`，同时声明拿到的是拷贝还是原对象。
+
+```go
+func (p Person) greet() { fmt.Println("你好,", p.Name) }
+func (p *Person) birthday() { p.Age++ }
+
+p := Person{Name: "安南", Age: 18}
+p.greet()
+p.birthday() // 自动取 &p
+```
+
+值接收者还是指针接收者，还会影响类型的**方法集**，进而影响能不能赋给某个接口。下一篇会把接口和这里接起来。
+
+## go mod，以及读文件、JSON
+
+`go.mod` 记录模块路径和依赖版本，有点像 `package.json`。`go.sum` **不是**完整的 lockfile（不像 `package-lock.json` 那样锁住整棵依赖树的安装形态）；它是校验和数据库，用来验证下载到的模块内容有没有被篡改。日常还会用 `go get`、`go mod tidy` 整理依赖。本地子包按模块路径 import，不要对纯本地路径去做一次网上的 `go get`。
+
+读文件：
+
+```go
+data, err := os.ReadFile("hello.txt")
+if err != nil {
+	fmt.Println("读失败:", err)
+	return
+}
+fmt.Println(string(data))
+```
+
+JSON 方面，`json.Marshal` 接近 `JSON.stringify`，`json.Unmarshal` 接近 `JSON.parse`。`Marshal` 返回的是 `[]byte`，打印时常用 `string(b)`。结构体字段可以用 tag 控制名字：
+
+```go
+type User struct {
+	Name string `json:"name"`
+	Age  int    `json:"age"`
+}
+b, err := json.Marshal(User{Name: "安南", Age: 18})
+if err != nil {
+	return
+}
+fmt.Println(string(b))
+
+var u2 User
+if err := json.Unmarshal([]byte(`{"name":"小明","age":20}`), &u2); err != nil {
+	return
+}
+```
+
+测试入门：测试文件名是 `*_test.go`，函数名是 `TestXxx(t *testing.T)`，在包目录执行 `go test`。table-driven 测试和 `httptest` 是值得继续亲手练的部分，本篇只记这个入口，不当成已经写熟。
+
+## 这一篇先记住
+
+- 入口是 `package main` + `func main()`。
+- 零值是默认值；`nil` 不是 `0`，也不是 `""`。
+- 错误是返回值，主路径靠检查 `err`。
+- 日常用切片，记得它默认共享底层数组。
+- struct 默认拷贝；要共享就用指针。
+- 方法靠接收者挂到类型上，没有 class。
+
+下一篇会进入更常考的易错点：[接口是怎么实现的，为什么「有类型的 nil」不等于 nil 接口，以及 panic / defer / recover 怎么配对](/posts/go/02-interface-nil-panic/)。

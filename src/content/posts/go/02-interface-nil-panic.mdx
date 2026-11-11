@@ -1,0 +1,201 @@
+---
+title: "Go 接口、nil 坑与 panic / defer / recover"
+published: 2026-11-11
+description: "接口靠方法集隐式实现；typed nil 放进接口后接口不等于 nil。panic、defer 的 LIFO，以及 recover 必须在同一个 goroutine 里由 deferred 函数直接调用。"
+tags: ["Go", "接口", "error"]
+category: "Go"
+series: "Go 复习笔记"
+seriesOrder: 2
+---
+
+这是「Go 复习笔记」第二篇，接在[基础语法对照](/posts/go/01-basics-for-js-devs/)后面，集中看接口、`make` / `new`，以及 `panic` / `defer` / `recover`。再往后是[并发原语](/posts/go/03-goroutine-channel-select/)。
+
+下面折叠块里，标了「追问」的是复习时真实问过的问题；其他折叠块是为了复习整理的问答。
+
+## 接口：隐式实现，看方法集
+
+Go 的接口是**隐式实现**的：不用写 `implements`。只要类型的**方法集**覆盖了接口声明的方法，就能赋给该接口。小接口（一两个方法）更常见，也更容易组合。
+
+```go
+type Speaker interface {
+	Speak() string
+}
+
+type Dog struct{ Name string }
+
+func (d Dog) Speak() string { return d.Name + ": 汪" }
+
+func say(s Speaker) { fmt.Println(s.Speak()) }
+
+func main() {
+	say(Dog{Name: "旺财"})
+}
+```
+
+标准库里也很常见，例如 `*os.File` 有 `Read`，就可以赋给 `io.Reader`：
+
+```go
+var r io.Reader = os.Stdin
+```
+
+值接收者和指针接收者的方法集不一样，会影响「这个值能不能赋给接口」。要改接收者，或结构体比较大时，常用指针接收者；又小又不会改的，可以用值接收者。这一条先作为规则记住，不必一次展开成方法集的全部表格。
+
+> [!NOTE]
+> **口述：** 方法齐了就算实现；这是鸭子类型；更偏好小接口。
+
+## nil 接口和 nil 指针
+
+主问题是：`nil` 接口和 `nil` 指针有什么坑？
+
+接口内部是 **type + value** 两格，可以记成快递单上的「品类」加「货」。单独的 `*T = nil` 只是货是空的；一旦塞进接口，快递单上**还有类型**，整张单就不再是「纯 nil 接口」。
+
+所以下面这件事会踩坑：把一个类型是 `*T`、值是 `nil` 的指针赋给 `error` 后，`err != nil` 为 true。业务里返回错误时，应该 `return nil`（裸 `nil`），不要返回「有类型的 nil 指针」。
+
+```go
+var p *os.PathError = nil
+var err error = p       // type=*PathError, value=nil
+fmt.Println(err == nil) // false ← 坑
+
+func f() error {
+	var e *os.PathError = nil
+	return e // 坏：返回 typed nil
+}
+
+func g() error {
+	return nil // 好：裸 nil
+}
+```
+
+<details>
+<summary>追问：nil 到底是啥？</summary>
+
+`nil` 是预声明的「空引用」标识：指针、切片、map、channel、函数、接口的零值可以是 `nil`。它不是数字 `0`，也不是空字符串。
+
+</details>
+
+<details>
+<summary>追问：赋值给 error 是不是只写了 value？</summary>
+
+不是。接口赋值会同时写入**动态类型**和**动态值**。执行 `err = p` 时，type 变成 `*T`，value 是 `nil`，所以接口整体不是 `nil`。
+
+</details>
+
+<details>
+<summary>追问：有类型的 nil 塞进接口，就不是纯 nil？</summary>
+
+对。只有 type 和 value **都空** 时，接口才 `== nil`。这就是「盒子里明明没货，但盒子外面贴了品类标签」。
+
+下面这段是同一条规则的代码对照：
+
+```go
+var p *os.PathError = nil
+var err error = p
+fmt.Println(err == nil) // false，因为接口里还有类型
+```
+
+</details>
+
+> [!WARNING]
+> **易错：** typed nil 放进接口后，接口不等于 `nil`。返回 `error` 用裸 `nil`。
+
+> [!NOTE]
+> **口述 30 秒：** 接口是 type + value；typed nil 放进接口后接口不等于 nil；返回 error 用裸 `nil`。
+
+## make 和 new
+
+`make` **只**给 slice、map、channel 做「可用的初始化」，返回的是类型本身，不是指针。`new(T)` 会分配一块 T 的零值，返回 `*T`。日常写结构体更常见的是 `&T{...}`，很少写 `new`。
+
+```go
+s := make([]int, 0, 8)    // slice
+m := make(map[string]int) // map
+ch := make(chan int, 2)   // channel
+
+p := new(int)           // *int，值是 0
+q := &User{Name: "安南"} // 更常见
+```
+
+> [!NOTE]
+> **口述 30 秒：** make 给 slice / map / channel 这三兄弟做初始化；new 出指针零值；结构体我写取地址的字面量。
+
+## panic、defer、recover
+
+`panic` 是运行时的**不可恢复式故障信号**（堆栈开始展开），不是日常业务错误。客户端断线、查无数据这类情况应该返回 `error`，不要 `panic`。
+
+`defer` 在函数返回前按 **LIFO**（后进先出）执行。
+
+`recover` 的有效条件比「写在 defer 里」更精确：
+
+- 它只拦**同一个 goroutine** 里的 panic，拦不住别的 goroutine。
+- 必须由 **deferred 函数直接调用**。`defer recover()` 这种写法通常没有效果，因为 `recover` 不是在 deferred 函数的函数体里被直接调用的。常见写法是 `defer func() { if r := recover(); r != nil { ... } }()`。
+- 如果只是在 defer 里调用另一个普通函数，再由那个函数去 `recover()`，一般也拦不住。
+- recover 成功后，当前这层函数里**还没跑完的 defer 会继续按 LIFO 跑完**，然后函数返回。不是一 recover 就清空 defer 队列。
+
+适合放在边界（HTTP handler、worker 入口）打日志、返回错误，不要在每个业务函数里都 recover。
+
+```go
+func safe() {
+	defer fmt.Println("1 后执行")
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("抓住:", r)
+		}
+	}()
+	defer fmt.Println("3 先执行（更靠近 panic）")
+	panic("boom")
+}
+// 典型输出顺序：3 → 抓住: boom → 1
+```
+
+<details>
+<summary>追问：panic 可以理解成故障吗？</summary>
+
+可以这么记：程序员或运行时认定「这条执行路径撑不住了」，比如空指针，或主动 `panic("bug")`。客户端断线、查无数据，用 `error`，别 `panic`。
+
+</details>
+
+<details>
+<summary>追问：recover 之后，是不是立刻停掉所有 defer？</summary>
+
+**不会。** recover 只是把当前 goroutine 里这次 panic「灭火」：当前这层函数里还没跑完的 defer 会继续按 LIFO 跑完，然后函数返回。不是一 recover 就清空 defer 队列。
+
+</details>
+
+<details>
+<summary>追问：`if r := recover(); r != nil` 是「或」关系吗？</summary>
+
+不是或。这是**短变量声明加判断**：先执行 `r := recover()`，再看 `r != nil`。没有 panic 时，`recover` 返回 `nil`，进不去 `if` 体。
+
+</details>
+
+<details>
+<summary>复习问答：输出顺序怎么记？</summary>
+
+进函数 → 注册 defer（先注册的后执行）→ panic → 开始跑 defer → 某个 defer 里直接调用的 `recover` 成功 → 剩余 defer 继续 → 函数返回。
+
+对应上面的例子：先打印更靠近 `panic` 的 `3 先执行`，再打印 `抓住: boom`，最后是 `1 后执行`。
+
+</details>
+
+> [!WARNING]
+> **场景：** 在 HTTP 中间件或任务 worker 的顶层 recover，打日志、返回 500；业务逻辑用 `error`。不要指望 recover 能修好别的 goroutine 里的 panic。
+
+> [!NOTE]
+> **口述 30 秒：** panic 展开栈；defer 是 LIFO；recover 要在同一个 goroutine 里由 deferred 函数直接调用；灭火后剩余 defer 仍跑；边界拦，业务用 error。
+
+## 另外几个常考点（短答）
+
+这些点在复习里出现过，但深度有限，这里只作提纲，不当成已经挖透：
+
+- **error 当值：** 错误要返回、要检查。包装常用 `fmt.Errorf("%w", err)`，再用 `errors.Is` / `errors.As` 判断。这一套还需要继续亲手练，本篇不写成已经掌握。
+- **defer 的参数求值：** 参数在 **defer 语句执行时**就求值，不是在函数真正返回时才算。
+- **`init`：** 包初始化时自动跑，无参数无返回；少用副作用，测试也更难。
+- **race detector：** `go test -race` / `go run -race` 用来找数据竞争，是加分项，知道有这个工具即可。
+
+## 这一篇先记住
+
+- 接口靠方法集隐式实现，偏好小接口。
+- 接口是 type + value；typed nil ≠ 接口的 nil；返回 error 用裸 `nil`。
+- `make` 给 slice / map / channel；`new` 是指针零值。
+- panic 不是业务错误；defer 是 LIFO；recover 必须在同一个 goroutine 里由 deferred 函数直接调用。
+
+下一篇把并发原语摊开：[goroutine、channel、select、close 和 worker 池](/posts/go/03-goroutine-channel-select/)。

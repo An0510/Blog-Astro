@@ -15,3 +15,4 @@ export { default as Steps } from "@/components/common/Steps.astro";
 export { default as TabGroup } from "@/components/common/TabGroup.svelte";
 export { default as Timeline } from "@/components/common/Timeline.astro";
 export { default as TimelineItem } from "@/components/common/TimelineItem.astro";
+export { default as GoDemoEmbed } from "@/components/misc/GoDemoEmbed.astro";
