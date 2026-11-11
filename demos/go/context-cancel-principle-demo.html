@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="context-cancel-principle-demo">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Go context 取消原理 · 动画</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2332;
+    --border: #2d3a4f;
+    --text: #e7ecf3;
+    --muted: #8b9bb4;
+    --accent: #38bdf8;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --danger: #f43f5e;
+    --ctx: #a78bfa;
+    --done: #fb7185;
+    --parent: #60a5fa;
+    --child: #2dd4bf;
+    --goro: #f59e0b;
+    --dim: #243044;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px 24px 40px;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; font-weight: 650; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin-bottom: 16px; }
+  .sub code { color: #cbd5e1; font-family: ui-monospace, Menlo, monospace; font-size: 0.88em; }
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 920px) { .layout { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+  .ctrl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .ctrl button {
+    border: 1px solid var(--border);
+    background: #121a26;
+    color: var(--text);
+    border-radius: 999px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .ctrl button:hover { border-color: var(--accent); }
+  .ctrl button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ctrl button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #041018;
+    font-weight: 650;
+  }
+  .step-meta {
+    font-size: 0.86rem;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .step-meta strong { color: var(--accent); }
+  .caption {
+    background: #121a24;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    min-height: 86px;
+  }
+  .caption .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--accent);
+    background: rgba(56,189,248,.12);
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-bottom: 6px;
+  }
+  .caption p { font-size: 14px; }
+  .caption .en {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .stage {
+    display: grid;
+    grid-template-columns: 1.15fr 0.95fr;
+    gap: 14px;
+  }
+  @media (max-width: 700px) { .stage { grid-template-columns: 1fr; } }
+  .tree-panel, .listen-panel {
+    background: #121a24;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    min-height: 320px;
+  }
+  .panel-title {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 12px;
+    letter-spacing: 0.02em;
+  }
+  .tree {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+  }
+  .node {
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #0d1219;
+    transition: border-color .25s, box-shadow .25s, opacity .25s, transform .2s;
+    opacity: 0.35;
+  }
+  .node.visible { opacity: 1; }
+  .node.active {
+    box-shadow: 0 0 0 3px rgba(56,189,248,.22);
+    transform: translateY(-1px);
+  }
+  .node.parent { border-color: rgba(96,165,250,.55); }
+  .node.child { border-color: rgba(45,212,191,.5); margin-left: 28px; }
+  .node.grandchild { border-color: rgba(167,139,250,.5); margin-left: 56px; }
+  .node.canceled {
+    border-color: rgba(244,63,94,.7);
+    background: rgba(244,63,94,.08);
+  }
+  .node .name {
+    font-weight: 650;
+    font-size: 0.92rem;
+    margin-bottom: 4px;
+  }
+  .node .meta { font-size: 0.78rem; color: var(--muted); }
+  .node .meta code {
+    color: #c5d4eb;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.92em;
+  }
+  .done-bar {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    font-size: 0.72rem;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: #0a0f16;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .chip.open {
+    border-color: rgba(251,113,133,.7);
+    color: #fda4af;
+    background: rgba(251,113,133,.12);
+    box-shadow: 0 0 12px rgba(251,113,133,.2);
+  }
+  .arrow-down {
+    width: 2px;
+    height: 14px;
+    background: #3a4a63;
+    margin: -2px 0 -2px 40px;
+    opacity: 0.35;
+    transition: background .25s, opacity .25s;
+  }
+  .arrow-down.on {
+    opacity: 1;
+    background: linear-gradient(180deg, var(--danger), #3a4a63);
+  }
+  .arrow-down.mid { margin-left: 68px; }
+  .goro {
+    border: 1.5px dashed var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    background: #0d1219;
+    opacity: 0.35;
+    transition: all .25s;
+  }
+  .goro.visible { opacity: 1; }
+  .goro.active {
+    border-style: solid;
+    border-color: var(--goro);
+    box-shadow: 0 0 0 3px rgba(245,158,11,.18);
+  }
+  .goro.stopped {
+    border-color: rgba(244,63,94,.55);
+    background: rgba(244,63,94,.06);
+  }
+  .goro .title {
+    font-weight: 650;
+    font-size: 0.9rem;
+    margin-bottom: 6px;
+  }
+  .goro .status { font-size: 0.8rem; color: var(--muted); }
+  .select-box {
+    margin-top: 8px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.72rem;
+    background: #0a0f16;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: #94a3b8;
+    white-space: pre;
+  }
+  .select-box .hl {
+    color: #fda4af;
+    background: rgba(244,63,94,.15);
+    border-radius: 3px;
+  }
+  .pulse {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .pulse.red { background: var(--danger); animation: blink 0.9s infinite; }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  .wave {
+    height: 28px;
+    margin: 8px 0 4px;
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #0a0f16;
+    border: 1px dashed transparent;
+  }
+  .wave.show {
+    border-color: rgba(244,63,94,.45);
+  }
+  .wave .bar {
+    position: absolute;
+    left: -40%;
+    top: 6px;
+    height: 16px;
+    width: 40%;
+    border-radius: 8px;
+    background: linear-gradient(90deg, transparent, rgba(244,63,94,.55), transparent);
+    opacity: 0;
+  }
+  .wave.show .bar {
+    opacity: 1;
+    animation: sweep 1.1s ease-out forwards;
+  }
+  @keyframes sweep {
+    from { left: -40%; }
+    to { left: 100%; }
+  }
+  .aside h2 { font-size: 1rem; margin-bottom: 10px; }
+  .aside p, .aside li {
+    font-size: 0.86rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .aside ul { padding-left: 1.15em; margin-bottom: 12px; }
+  .aside code {
+    font-size: 0.82em;
+    background: #121a26;
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: #c5d4eb;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .kw {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 8px 0 14px;
+  }
+  .kw span {
+    font-size: 0.72rem;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: #121a26;
+    border: 1px solid var(--border);
+    color: #b8c7de;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .callout {
+    background: rgba(56,189,248,.08);
+    border: 1px solid rgba(56,189,248,.25);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 0.84rem;
+    color: #c5d4eb;
+    margin-top: 8px;
+  }
+  .callout strong { color: var(--accent); }
+  .mini {
+    margin-top: 14px;
+    font-size: 0.84rem;
+    color: var(--muted);
+  }
+  .mini code {
+    color: #cbd5e1;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.9em;
+  }
+  .log {
+    margin-top: 14px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.75rem;
+    max-height: 140px;
+    overflow: auto;
+    background: #0d1219;
+    border-radius: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+  }
+  .log div { color: var(--muted); margin-bottom: 3px; }
+  .log div.now { color: var(--ok); }
+</style>
+  <script>window.parent!==window&&document.documentElement.classList.add("go-demo-is-embed");
+</script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>context 取消原理：不是魔法杀进程</h1>
+    <p class="sub">
+      核心：<code>cancel()</code> → 关闭 <code>Done</code> channel → 听的人自己停。
+      对照 JS：像 AbortController 的 <code>signal</code>，不是 <code>kill(-9)</code>。
+    </p>
+
+    <div class="layout">
+      <div class="card">
+        <div class="ctrl">
+          <button type="button" id="btnPrev">上一步</button>
+          <button type="button" class="primary" id="btnPlay">播放</button>
+          <button type="button" id="btnPause">暂停</button>
+          <button type="button" id="btnNext">下一步</button>
+          <button type="button" id="btnReset">重置</button>
+        </div>
+        <div class="step-meta">步骤 <strong id="stepNum">1</strong> / <span id="stepTotal">0</span></div>
+
+        <div class="caption">
+          <div class="tag" id="capTag">原理</div>
+          <p id="capZh"></p>
+          <div class="en" id="capEn"></div>
+        </div>
+
+        <div class="stage">
+          <div class="tree-panel">
+            <div class="panel-title">CONTEXT 树 · Done 通道状态</div>
+            <div class="tree">
+              <div class="node parent" id="nRoot">
+                <div class="name">Background（根）</div>
+                <div class="meta">通常永不 cancel · 当父节点用</div>
+                <div class="done-bar"><span class="chip" id="chipRoot">无 Done / 不可取消</span></div>
+              </div>
+              <div class="arrow-down" id="arr1"></div>
+              <div class="node child" id="nParent">
+                <div class="name">ctx（父）· WithCancel</div>
+                <div class="meta"><code>ctx, cancel := context.WithCancel(Background)</code></div>
+                <div class="done-bar">
+                  <span class="chip" id="chipParent">Done: 未关闭</span>
+                  <span class="chip" id="chipCancelFn">cancel 已拿到</span>
+                </div>
+              </div>
+              <div class="arrow-down mid" id="arr2"></div>
+              <div class="node grandchild" id="nChild">
+                <div class="name">child · WithCancel(ctx)</div>
+                <div class="meta">子 context · 父一取消，自己也会取消</div>
+                <div class="done-bar"><span class="chip" id="chipChild">Done: 未关闭</span></div>
+              </div>
+            </div>
+            <div class="wave" id="wave"><div class="bar"></div></div>
+            <div class="mini" id="waveHint">取消波纹会画在这里</div>
+          </div>
+
+          <div class="listen-panel">
+            <div class="panel-title">GOROUTINE · 必须自己听</div>
+            <div class="goro" id="g1">
+              <div class="title"><span class="pulse" id="p1"></span>worker A · 听父 ctx</div>
+              <div class="status" id="s1">尚未启动</div>
+              <div class="select-box" id="sel1">select {
+  case &lt;-ctx.Done():  // 等信号
+  case &lt;-work:        // 干活
+}</div>
+            </div>
+            <div class="goro" id="g2">
+              <div class="title"><span class="pulse" id="p2"></span>worker B · 听 child</div>
+              <div class="status" id="s2">尚未启动</div>
+              <div class="select-box" id="sel2">select {
+  case &lt;-child.Done():
+  default:
+    // 继续干活
+}</div>
+            </div>
+            <div class="goro" id="g3">
+              <div class="title"><span class="pulse" id="p3"></span>聋子 worker · 不听 Done</div>
+              <div class="status" id="s3">尚未启动</div>
+              <div class="select-box" id="sel3">for {
+  doWork()  // 没 select / 没查 Err
+}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="log" id="log"></div>
+      </div>
+
+      <aside class="aside card">
+        <h2>原理三句话</h2>
+        <ul>
+          <li><code>WithCancel</code> 造出一对：<code>ctx</code> + <code>cancel</code>。</li>
+          <li><code>cancel()</code> 的实质是<strong>关闭</strong>该 ctx 的 <code>Done</code> channel（可广播给所有接收者）。</li>
+          <li>子 context 挂在父上：父取消 → 子也取消（向下传播）。</li>
+        </ul>
+        <div class="kw">
+          <span>WithCancel</span>
+          <span>cancel</span>
+          <span>Done</span>
+          <span>select</span>
+          <span>ctx.Err</span>
+          <span>传播</span>
+        </div>
+        <h2>协作式，不是强杀</h2>
+        <p>运行时<strong>不会</strong>因为 cancel 就干掉 goroutine。你的代码必须：</p>
+        <ul>
+          <li><code>select</code> 里带 <code>&lt;-ctx.Done()</code>，或</li>
+          <li>循环里查 <code>ctx.Err() != nil</code></li>
+        </ul>
+        <p>不听的「聋子」会继续跑——对照 JS：不读 <code>AbortSignal</code> 的 fetch 辅助逻辑也不会停。</p>
+        <div class="callout">
+          <strong>go-mini-api</strong> 里的 <code>maybeSleep</code>：
+          <code>select</code> 同时听 <code>timer.C</code> 和 <code>r.Context().Done()</code>；
+          客户端超时 → Done 关闭 → 立刻 <code>return err</code>，不再傻等。
+        </div>
+        <p class="mini" style="margin-top:14px">
+          练习：<code>curl '.../items?sleep=5000' --max-time 1</code>
+        </p>
+      </aside>
+    </div>
+  </div>
+
+<script>(function(){const $=id=>document.getElementById(id),steps=[{tag:"\u8D77\u70B9",zh:"\u53EA\u6709 Background \u6839\u8282\u70B9\u3002\u5B83\u4E00\u822C\u4E0D\u53D6\u6D88\uFF0C\u53EA\u5F53\u300C\u6D3E\u751F\u8D77\u70B9\u300D\u3002",en:"context.Background() \u2014 root, usually never canceled",log:"\u521D\u59CB\uFF1A\u4EC5 Background",apply(v){v.active="root"}},{tag:"WithCancel",zh:"WithCancel(Background) \u6D3E\u751F\u51FA\u7236 ctx\uFF0C\u5E76\u8FD4\u56DE cancel \u51FD\u6570\u3002\u6B64\u523B Done \u8FD8\u662F\u5F00\u7740\u7684\uFF08\u672A\u5173\u95ED = \u8FD8\u6CA1\u53D6\u6D88\uFF09\u3002",en:"ctx, cancel := context.WithCancel(context.Background())",log:"\u521B\u5EFA\u7236 ctx + cancel\uFF1BDone \u672A\u5173\u95ED",apply(v){v.parent=!0,v.arr1=!0,v.active="parent",v.s1="\u53EF\u4EE5\u5F00\u59CB\u542C\u8FD9\u4E2A ctx \u4E86"}},{tag:"\u5B50 context",zh:"\u518D WithCancel(ctx) \u5F97\u5230 child\u3002\u7236\u5B50\u8FDE\u6210\u6811\uFF1A\u4EE5\u540E\u7236\u4E00\u53D6\u6D88\uFF0Cchild \u4E5F\u4F1A\u88AB\u6807\u6210 canceled\u3002",en:"child, stop := context.WithCancel(ctx)",log:"\u6D3E\u751F child\uFF0C\u6302\u5728\u7236 ctx \u4E0B",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.active="child"}},{tag:"\u5F00\u59CB\u542C",zh:"\u4E09\u4E2A goroutine\uFF1AA \u542C\u7236 Done\uFF0CB \u542C child Done\uFF0C\u804B\u5B50\u5B8C\u5168\u4E0D\u542C\u3002\u53D6\u6D88\u662F\u534F\u4F5C\u7684\u2014\u2014\u4E0D\u542C\u5C31\u4E0D\u77E5\u9053\u3002",en:"go worker\u2026  select { case <-ctx.Done(): \u2026 }",log:"worker \u542F\u52A8\uFF1Bselect \u6302\u8D77\u7B49\u5F85",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.active="g1",v.s1="\u963B\u585E\u5728 <-ctx.Done() / \u5E72\u6D3B\u5206\u652F",v.s2="\u963B\u585E\u5728 <-child.Done()",v.s3="\u57CB\u5934 for \u5FAA\u73AF\uFF0C\u4E0D\u770B context"}},{tag:"cancel()",zh:"\u8C03\u7528 cancel()\uFF1A\u8FD0\u884C\u65F6\u5173\u95ED\u7236 ctx \u7684 Done channel\u3002\u50CF\u5E7F\u64AD\uFF1A\u6240\u6709 <-ctx.Done() \u7ACB\u523B\u53EF\u8BFB\u3002",en:"cancel()  \u21D2  close(parent.Done)",log:"cancel() \u2192 \u7236 Done \u5173\u95ED",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.pDone=!0,v.wave=!0,v.active="parent",v.hl1=!0,v.s1="select \u547D\u4E2D Done \u5206\u652F\u2026",v.s2="\u4ECD\u5728\u542C child\uFF08\u7236\u521A\u5173\uFF0C\u4F20\u64AD\u4E0B\u4E00\u6B65\uFF09",v.s3="\u57CB\u5934 for \u5FAA\u73AF\uFF0C\u4E0D\u770B context",v.sel1=`select {
+  case <-ctx.Done():  // \u2190 \u547D\u4E2D
+    return
+}`}},{tag:"\u4F20\u64AD",zh:"\u7236\u53D6\u6D88\u81EA\u52A8\u4F20\u5230 child\uFF1Achild \u7684 Done \u4E5F\u88AB\u5173\u95ED\u3002B \u542C\u5230 child.Done \u540E\u9000\u51FA\u3002\u8FD9\u5C31\u662F\u300C\u5411\u4E0B\u4F20\u64AD\u300D\u3002",en:"parent canceled \u21D2 child.Done also closed",log:"\u53D6\u6D88\u5411\u4E0B\u4F20\u64AD\u5230 child",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.pDone=!0,v.cDone=!0,v.wave=!0,v.g1Stop=!0,v.g2Stop=!0,v.active="child",v.hl1=!0,v.hl2=!0,v.s1="\u5DF2 return \xB7 \u7236 ctx \u53D6\u6D88",v.s2="select \u547D\u4E2D child.Done \u2192 return",v.s3="\u57CB\u5934 for \u5FAA\u73AF\uFF0C\u4E0D\u770B context",v.sel1=`select {
+  case <-ctx.Done():  // \u2190 \u547D\u4E2D
+    return
+}`,v.sel2=`select {
+  case <-child.Done(): // \u2190 \u547D\u4E2D
+    return
+}`}},{tag:"\u804B\u5B50\u8FD8\u5728",zh:"\u804B\u5B50\u6CA1\u542C Done\uFF0C\u6240\u4EE5\u8FD8\u5728\u8DD1\uFF01\u8BC1\u660E\uFF1Acancel \u2260 \u5F3A\u6740 goroutine\u3002\u5FC5\u987B\u81EA\u5DF1 select / \u67E5 ctx.Err()\u3002",en:"no listen \u21D2 still running (cooperative cancel)",log:"\u804B\u5B50\u65E0\u89C6\u53D6\u6D88\uFF0C\u7EE7\u7EED\u8DD1\uFF08\u5751\uFF09",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.pDone=!0,v.cDone=!0,v.g1Stop=!0,v.g2Stop=!0,v.active="g3",v.s1="\u5DF2 return \xB7 \u7236 ctx \u53D6\u6D88",v.s2="\u5DF2 return \xB7 child \u8DDF\u7740\u53D6\u6D88",v.s3="\u8FD8\u5728 doWork()\u2026\u2026\u6CA1\u4EBA\u80FD\u66FF\u5B83\u505C",v.sel1=`select {
+  case <-ctx.Done():
+    return
+}`,v.sel2=`select {
+  case <-child.Done():
+    return
+}`}},{tag:"ctx.Err()",zh:"\u9664\u4E86 select\uFF0C\u4E5F\u53EF\u4EE5\u8F6E\u8BE2\uFF1A\u82E5 ctx.Err()!=nil\uFF08Canceled / DeadlineExceeded\uFF09\u5C31\u6536\u5DE5\u3002\u9002\u5408\u975E\u963B\u585E\u5FAA\u73AF\u3002",en:"if err := ctx.Err(); err != nil { return err }",log:"\u53E6\u4E00\u79CD\u542C\u6CD5\uFF1A\u67E5 ctx.Err()",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.pDone=!0,v.cDone=!0,v.g1Stop=!0,v.g2Stop=!0,v.active="g1",v.hl1=!0,v.s1="\u7528 Err() \u4E3B\u52A8\u67E5\u8BE2\uFF0C\u4E00\u6837\u80FD\u505C",v.s2="\u5DF2 return \xB7 child \u8DDF\u7740\u53D6\u6D88",v.s3="\u8FD8\u5728 doWork()\u2026\u2026\u6CA1\u4EBA\u80FD\u66FF\u5B83\u505C",v.sel1=`if err := ctx.Err(); err != nil {
+  return err  // Canceled
+}`}},{tag:"mini-api",zh:"go-mini-api \u7684 maybeSleep\uFF1Atimer \u548C r.Context().Done() \u4E8C\u9009\u4E00\u3002\u5BA2\u6237\u7AEF --max-time \u65AD\u5F00 \u2192 Done \u5173 \u2192 \u9A6C\u4E0A\u8FD4\u56DE\uFF0C\u4E0D\u50BB\u7761\u6EE1 sleep\u3002",en:"select { case <-r.Context().Done(): return err; case <-timer.C: }",log:"\u5BF9\u7167 maybeSleep\uFF1A\u542C\u8BF7\u6C42 context",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.pDone=!0,v.cDone=!0,v.g1Stop=!0,v.g2Stop=!0,v.active="g1",v.hl1=!0,v.s1="\u7B49\u4EF7 maybeSleep \u7684 Done \u5206\u652F",v.s2="\u5B50\u8BF7\u6C42\u4E5F\u53EF\u6302\u540C\u4E00\u68F5 context \u6811",v.s3="\u82E5\u53EA time.Sleep(5s) \u5C31\u4F1A\u767D\u7B49\uFF08\u804B\uFF09",v.sel1=`select {
+  case <-r.Context().Done():
+    return r.Context().Err()
+  case <-timer.C:
+    return nil
+}`,v.sel3=`time.Sleep(5*time.Second)
+// \u53D6\u6D88\u4E86\u4E5F\u7167\u7761 \u2014\u2014 \u53CD\u4F8B`}},{tag:"\u8BB0\u4F4F",zh:"\u4E00\u53E5\u8BDD\uFF1Acancel \u5173 Done\uFF1B\u5B50\u8DDF\u7740\u7236\uFF1Bgoroutine \u8981\u81EA\u5DF1\u542C\u3002\u50CF AbortController\uFF0C\u4E0D\u662F\u6740\u7EBF\u7A0B\u3002",en:"close(Done) + propagate + cooperative listen",log:"\u539F\u7406\u6536\u675F",apply(v){v.parent=!0,v.child=!0,v.arr1=!0,v.arr2=!0,v.g1=!0,v.g2=!0,v.g3=!0,v.pDone=!0,v.cDone=!0,v.g1Stop=!0,v.g2Stop=!0,v.active="parent",v.s1="\u542C\u4E86 \u2192 \u5E72\u51C0\u9000\u51FA",v.s2="\u8DDF\u7740\u7236\u53D6\u6D88 \u2192 \u9000\u51FA",v.s3="\u4E0D\u542C \u2192 \u6CC4\u6F0F/\u767D\u5E72\u6D3B",v.sel1="select { case <-ctx.Done(): return }",v.sel2="select { case <-child.Done(): return }",v.sel3="for { doWork() } // \u53CD\u4F8B"}}];function baseState(){return{root:!0,parent:!1,child:!1,pDone:!1,cDone:!1,g1:!1,g2:!1,g3:!1,g1Stop:!1,g2Stop:!1,g3Stop:!1,wave:!1,arr1:!1,arr2:!1,s1:"\u5C1A\u672A\u542F\u52A8",s2:"\u5C1A\u672A\u542F\u52A8",s3:"\u5C1A\u672A\u542F\u52A8",sel1:`select {
+  case <-ctx.Done():
+  case <-work:
+}`,sel2:`select {
+  case <-child.Done():
+  default:
+}`,sel3:`for {
+  doWork()  // \u6CA1\u542C Done
+}`,hl1:!1,hl2:!1,active:"root"}}let idx=0,timer=null;const state={};function clearActive(){["nRoot","nParent","nChild","g1","g2","g3"].forEach(id=>$(id).classList.remove("active"))}function render(){const step=steps[idx];Object.assign(state,baseState()),step.apply(state),$("stepNum").textContent=String(idx+1),$("stepTotal").textContent=String(steps.length),$("capTag").textContent=step.tag,$("capZh").textContent=step.zh,$("capEn").textContent=step.en,$("nRoot").classList.toggle("visible",!!state.root),$("nParent").classList.toggle("visible",!!state.parent),$("nChild").classList.toggle("visible",!!state.child),$("nParent").classList.toggle("canceled",!!state.pDone),$("nChild").classList.toggle("canceled",!!state.cDone),$("arr1").classList.toggle("on",!!state.arr1&&!!state.pDone),$("arr2").classList.toggle("on",!!state.arr2&&!!state.cDone),$("arr1").style.opacity=state.arr1?"1":"",$("arr2").style.opacity=state.arr2?"1":"",$("chipParent").textContent=state.pDone?"Done: \u5DF2\u5173\u95ED \u2715":"Done: \u672A\u5173\u95ED",$("chipParent").classList.toggle("open",!!state.pDone),$("chipChild").textContent=state.cDone?"Done: \u5DF2\u5173\u95ED \u2715":"Done: \u672A\u5173\u95ED",$("chipChild").classList.toggle("open",!!state.cDone),$("chipCancelFn").style.display=state.parent?"":"none";const wave=$("wave");state.wave?(wave.classList.remove("show"),wave.offsetWidth,wave.classList.add("show"),$("waveHint").textContent="\u53D6\u6D88\u6CE2\u7EB9\uFF1ADone \u5173\u95ED \u2192 \u6CBF\u6811\u5411\u4E0B\u901A\u77E5"):(wave.classList.remove("show"),$("waveHint").textContent=state.pDone?"\u7236/\u5B50 Done \u5DF2\u5173\u95ED\uFF08\u901A\u9053\u88AB close\uFF09":"\u53D6\u6D88\u6CE2\u7EB9\u4F1A\u753B\u5728\u8FD9\u91CC"),[["g1",state.g1,state.g1Stop,"p1"],["g2",state.g2,state.g2Stop,"p2"],["g3",state.g3,state.g3Stop,"p3"]].forEach(function(row){const el=$(row[0]);el.classList.toggle("visible",!!row[1]),el.classList.toggle("stopped",!!row[2]),$(row[3]).classList.toggle("red",!!row[2])}),$("s1").textContent=state.s1,$("s2").textContent=state.s2,$("s3").textContent=state.s3,$("sel1").innerHTML=highlight(state.sel1,state.hl1),$("sel2").innerHTML=highlight(state.sel2,state.hl2),$("sel3").textContent=state.sel3,clearActive();const a={root:"nRoot",parent:"nParent",child:"nChild",g1:"g1",g2:"g2",g3:"g3"}[state.active];a&&$(a).classList.add("active"),$("btnPrev").disabled=idx===0,$("btnNext").disabled=idx>=steps.length-1;const line=document.createElement("div");line.textContent="\xB7 "+step.log,line.className="now";const log=$("log");Array.from(log.children).forEach(c=>c.classList.remove("now")),log.appendChild(line),log.scrollTop=log.scrollHeight}function highlight(text,on){const esc=text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");return on?esc.replace(/(case &lt;-[^\n]+)/,'<span class="hl">$1</span>').replace(/(if err := ctx\.Err\(\)[^\n]*)/,'<span class="hl">$1</span>'):esc}function go(i){idx=Math.max(0,Math.min(steps.length-1,i)),render()}function play(){timer||($("btnPlay").disabled=!0,timer=setInterval(function(){if(idx>=steps.length-1){pause();return}go(idx+1)},2200))}function pause(){timer&&(clearInterval(timer),timer=null),$("btnPlay").disabled=!1}function reset(){pause(),$("log").innerHTML="",go(0)}$("btnPrev").onclick=function(){pause(),go(idx-1)},$("btnNext").onclick=function(){pause(),go(idx+1)},$("btnPlay").onclick=play,$("btnPause").onclick=pause,$("btnReset").onclick=reset,reset()})();
+</script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>

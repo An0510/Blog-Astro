@@ -1,0 +1,23 @@
+/* 仅在被博客 iframe 嵌入时生效。不要用 overflow:hidden 裁掉正文来假装无滚动。 */
+html.go-demo-is-embed,
+html.go-demo-is-embed body {
+	min-height: 0 !important;
+	height: auto !important;
+	max-height: none !important;
+	overflow-y: visible !important;
+}
+
+/* 个别演示把主内边距写在 body 上，保留 padding，只取消视口撑高 */
+html.go-demo-is-embed .wrap {
+	min-height: 0 !important;
+	height: auto !important;
+}
+
+/* 嵌入时取消 .log 的固定 max-height 与内部纵滚，随内容撑开，由博客外页滚动。
+   必须同时覆盖 overflow（不能只写 overflow-y:visible：若另一轴仍是 auto，visible 会被算成 auto）。
+   不改 .code 的 overflow-x，也不改动画用的 overflow:hidden（管道 / 进度条 / 插槽 / 波形）。 */
+html.go-demo-is-embed .log {
+	max-height: none !important;
+	height: auto !important;
+	overflow: visible !important;
+}

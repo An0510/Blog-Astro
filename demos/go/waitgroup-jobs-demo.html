@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="waitgroup-jobs-demo">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WaitGroup + jobs channel 执行演示</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --danger: #f07178;
+      --main: #4c6ef5;
+      --w1: #12b886;
+      --w2: #fab005;
+      --w3: #e64980;
+      --ch: #2a6f97;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px 20px 56px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 650;
+      margin: 0 0 6px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 18px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .ctrl {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .ctrl button {
+      border: 1px solid var(--border);
+      background: #121a26;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .ctrl button:hover { border-color: var(--accent); }
+    .ctrl button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .ctrl button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #041018;
+      font-weight: 600;
+    }
+    .step-label {
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .step-label strong { color: var(--accent); }
+    .stage {
+      display: grid;
+      grid-template-columns: 140px 1fr 160px;
+      gap: 14px;
+      align-items: stretch;
+      min-height: 280px;
+    }
+    @media (max-width: 700px) {
+      .stage { grid-template-columns: 1fr; }
+    }
+    .col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .actor {
+      border-radius: 12px;
+      padding: 12px 10px;
+      border: 2px solid transparent;
+      min-height: 72px;
+      transition: box-shadow .25s, border-color .25s, transform .2s, background .25s;
+      background: #121a26;
+    }
+    .actor.active {
+      box-shadow: 0 0 0 2px rgba(61,156,240,.35);
+      transform: translateY(-1px);
+    }
+    .actor.done-state {
+      opacity: 0.72;
+      border-color: rgba(62,207,142,.45);
+    }
+    .actor .name {
+      font-weight: 650;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+    .actor .status {
+      font-size: 0.82rem;
+      color: var(--muted);
+      min-height: 2.4em;
+    }
+    .main { border-color: rgba(76,110,245,.45); background: rgba(76,110,245,.12); }
+    .w1 { border-color: rgba(18,184,134,.45); background: rgba(18,184,134,.1); }
+    .w2 { border-color: rgba(250,176,5,.45); background: rgba(250,176,5,.1); }
+    .w3 { border-color: rgba(230,73,128,.45); background: rgba(230,73,128,.1); }
+
+    .channel-box {
+      border: 2px dashed rgba(42,111,151,.7);
+      border-radius: 14px;
+      padding: 14px 12px;
+      background: rgba(42,111,151,.12);
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      transition: border-color .25s, box-shadow .25s;
+    }
+    .channel-box.hot {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(61,156,240,.25);
+    }
+    .channel-box.closed {
+      border-style: solid;
+      border-color: var(--danger);
+      background: rgba(240,113,120,.08);
+    }
+    .ch-title {
+      font-weight: 650;
+      font-size: 0.95rem;
+    }
+    .ch-meta {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .token {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: var(--ch);
+      color: #fff;
+      font-weight: 700;
+      font-size: 1rem;
+      opacity: 0;
+      transform: scale(.6);
+      transition: opacity .25s, transform .25s;
+    }
+    .token.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .wg-box {
+      margin-top: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      background: #121a26;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .wg-box.active {
+      border-color: var(--warn);
+      box-shadow: 0 0 0 2px rgba(240,180,41,.2);
+    }
+    .counter {
+      font-size: 1.6rem;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+      color: var(--warn);
+      min-width: 2.2em;
+      text-align: center;
+    }
+    .counter.zero { color: var(--ok); }
+    .code {
+      margin-top: 14px;
+      background: #0b1018;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.55;
+      white-space: pre;
+    }
+    .code .hl {
+      background: rgba(61,156,240,.22);
+      outline: 1px solid rgba(61,156,240,.45);
+      border-radius: 4px;
+    }
+    .note h2 {
+      margin: 0 0 10px;
+      font-size: 1.05rem;
+    }
+    .note p, .note li {
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .note .muted { color: var(--muted); }
+    .kw {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 6px;
+      background: rgba(61,156,240,.18);
+      color: #9ec9f5;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.84em;
+    }
+    .tip {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(240,180,41,.1);
+      border: 1px solid rgba(240,180,41,.35);
+      font-size: 0.88rem;
+    }
+    .log {
+      margin-top: 10px;
+      max-height: 220px;
+      overflow: auto;
+      font-size: 0.82rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    .log div { margin-bottom: 6px; }
+    .log .now { color: var(--ok); }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 12px;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; margin-right: 4px;
+    }
+  </style>
+  <script>window.parent!==window&&document.documentElement.classList.add("go-demo-is-embed");
+</script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>WaitGroup + 无缓冲 jobs channel：逐步执行</h1>
+    <p class="sub">对应这段代码：3 个 worker + 只发送 1 个任务 + <span class="kw">close</span> + <span class="kw">Wait</span>。点「下一步」看谁真正拿到任务。</p>
+
+    <div class="layout">
+      <div class="card">
+        <div class="ctrl">
+          <button type="button" id="btnPrev">上一步</button>
+          <button type="button" class="primary" id="btnNext">下一步</button>
+          <button type="button" id="btnAuto">自动播放</button>
+          <button type="button" id="btnReset">重置</button>
+        </div>
+        <div class="step-label">步骤 <strong id="stepNum">0</strong> / <span id="stepTotal">0</span> · <span id="stepTitle">初始</span></div>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--main)"></i>main</span>
+          <span><i class="dot" style="background:var(--w1)"></i>worker1</span>
+          <span><i class="dot" style="background:var(--w2)"></i>worker2</span>
+          <span><i class="dot" style="background:var(--w3)"></i>worker3</span>
+          <span>无缓冲 channel：<span class="kw">make(chan int)</span></span>
+        </div>
+
+        <div class="stage">
+          <div class="col">
+            <div class="actor main" id="mainActor">
+              <div class="name">main（也是 goroutine）</div>
+              <div class="status" id="mainStatus">准备开始</div>
+            </div>
+            <div class="wg-box" id="wgBox">
+              <div>
+                <div style="font-weight:650">sync.WaitGroup</div>
+                <div class="ch-meta">Add / Done / Wait</div>
+              </div>
+              <div class="counter" id="wgCount">0</div>
+            </div>
+          </div>
+
+          <div class="channel-box" id="channelBox">
+            <div class="ch-title">jobs channel（无缓冲）</div>
+            <div class="token" id="jobToken">1</div>
+            <div class="ch-meta" id="chMeta">容量 0 · 发送/接收必须配对</div>
+          </div>
+
+          <div class="col">
+            <div class="actor w1" id="w1">
+              <div class="name">worker 1</div>
+              <div class="status" id="w1Status">未启动</div>
+            </div>
+            <div class="actor w2" id="w2">
+              <div class="name">worker 2</div>
+              <div class="status" id="w2Status">未启动</div>
+            </div>
+            <div class="actor w3" id="w3">
+              <div class="name">worker 3</div>
+              <div class="status" id="w3Status">未启动</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="code" id="codeBlock"></div>
+      </div>
+
+      <div class="card note">
+        <h2>本步说明</h2>
+        <div id="noteBody"></div>
+        <div class="tip" id="tipBox"></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>const CODE_LINES=["jobs := make(chan int)                 // \u65E0\u7F13\u51B2 channel","var wg sync.WaitGroup","for i := 0; i < 3; i++ {","    wg.Add(1)                          // \u8BA1\u6570 +1","    go func() {","        defer wg.Done()                // \u9000\u51FA\u65F6\u8BA1\u6570 -1","        for j := range jobs {          // \u963B\u585E\u63A5\u6536\uFF0C\u76F4\u5230 close","            _ = j","        }","    }()","}","jobs <- 1                              // \u53D1\u9001 1 \u4E2A\u4EFB\u52A1","close(jobs)                            // \u4E0D\u518D\u6709\u65B0\u4EFB\u52A1","wg.Wait()                              // \u7B49\u5230\u8BA1\u6570\u5F52\u96F6"],steps=[{title:"\u521D\u59CB\u72B6\u6001",hl:[],wg:0,closed:!1,token:!1,main:"\u521B\u5EFA jobs\uFF08\u65E0\u7F13\u51B2\uFF09\u548C WaitGroup",workers:["\u672A\u542F\u52A8","\u672A\u542F\u52A8","\u672A\u542F\u52A8"],active:["main"],note:`<p>\u5148\u770B\u6574\u6761\u94FE\u8DEF\u7684\u89D2\u8272\uFF1A</p>
+          <ul>
+            <li><span class="kw">main</span>\uFF1A\u53D1\u4EFB\u52A1\u3001\u5173 channel\u3001\u6700\u540E Wait</li>
+            <li>3 \u4E2A <span class="kw">goroutine</span> worker\uFF1A\u62A2\u540C\u4E00\u4E2A <span class="kw">jobs</span></li>
+            <li><span class="kw">WaitGroup</span>\uFF1A\u8BA1\u6570\u8FD8\u6709\u51E0\u4E2A worker \u6CA1\u7ED3\u675F</li>
+            <li><span class="kw">jobs</span>\uFF1A\u65E0\u7F13\u51B2 <span class="kw">make(chan int)</span></li>
+          </ul>`,tip:"\u5173\u952E\u8BCD\uFF1Achannel \xB7 WaitGroup \xB7 goroutine",log:"\u5F00\u59CB\u6F14\u793A\u8FD9\u6BB5\u793A\u4F8B\u4EE3\u7801\u7684\u6267\u884C\u987A\u5E8F\uFF08\u8C03\u5EA6\u7EC6\u8282\u7B80\u5316\uFF0C\u65B9\u4FBF\u7406\u89E3\uFF09\u3002"},{title:"wg.Add(1) \u4E09\u6B21",hl:[2,3],wg:3,closed:!1,token:!1,main:"\u5FAA\u73AF\u91CC Add(1) \xD7 3\uFF0C\u8BA1\u6570\u53D8\u6210 3",workers:["\u5373\u5C06\u542F\u52A8\u2026","\u5373\u5C06\u542F\u52A8\u2026","\u5373\u5C06\u542F\u52A8\u2026"],active:["main","wg"],note:`<p>\u6BCF\u6B21\u51C6\u5907\u5F00\u4E00\u4E2A worker \u524D\u5148 <span class="kw">wg.Add(1)</span>\u3002</p>
+          <p class="muted">\u8BA1\u6570\u4ECE 0 \u2192 1 \u2192 2 \u2192 3\u3002\u8868\u793A main \u8FD8\u8981\u7B49 3 \u4E2A\u4EFB\u52A1\u5B8C\u6210\u4FE1\u53F7\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1AWaitGroup \xB7 Add \u2014\u2014 \u767B\u8BB0\u201C\u8FD8\u8981\u7B49\u51E0\u4E2A\u201D",log:"WaitGroup \u8BA1\u6570 = 3"},{title:"\u542F\u52A8 3 \u4E2A worker",hl:[4,5,6],wg:3,closed:!1,token:!1,main:"\u4E09\u4E2A go func \u5DF2\u542F\u52A8\uFF0C\u81EA\u5DF1\u7EE7\u7EED\u5F80\u540E\u8D70",workers:["\u5361\u5728 for range jobs\uFF08\u7B49\u63A5\u6536\uFF09","\u5361\u5728 for range jobs\uFF08\u7B49\u63A5\u6536\uFF09","\u5361\u5728 for range jobs\uFF08\u7B49\u63A5\u6536\uFF09"],active:["w1","w2","w3"],note:`<p>\u4E09\u4E2A worker \u90FD\u8FDB\u5165 <span class="kw">for range jobs</span>\u3002</p>
+          <p>\u65E0\u7F13\u51B2 channel \u91CC\u8FD8\u6CA1\u6709\u503C\uFF0C\u4E5F\u8FD8\u6CA1 <span class="kw">close</span>\uFF0C\u6240\u4EE5\u4E09\u4E2A\u90FD\u5728 <strong>\u963B\u585E\u63A5\u6536</strong>\u2014\u2014\u53EA\u5361\u4F4F\u5404\u81EA\u7684 goroutine\uFF0C\u4E0D\u662F\u6B7B\u9501\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1Arange \xB7 \u963B\u585E \xB7 \u65E0\u7F13\u51B2 channel",log:"3 \u4E2A worker \u5728 range \u4E0A\u7B49\u5F85\u53D1\u9001\u65B9"},{title:"jobs \u2190 1\uFF08\u914D\u5BF9\u53D1\u9001\uFF09",hl:[11],wg:3,closed:!1,token:!0,main:"\u6267\u884C jobs <- 1\uFF0C\u4E0E\u67D0\u4E2A\u7B49\u5F85\u4E2D\u7684 worker \u914D\u5BF9",workers:["\u6536\u5230 j=1\uFF0C\u5904\u7406 _ = j","\u4ECD\u5728 range \u7B49\u5F85\u2026","\u4ECD\u5728 range \u7B49\u5F85\u2026"],active:["main","channel","w1"],note:`<p><strong>\u91CD\u70B9\uFF1A</strong>\u53EA\u6709 <em>\u4E00\u4E2A</em> worker \u80FD\u62FF\u5230\u8FD9\u552F\u4E00\u7684\u4EFB\u52A1\u3002</p>
+          <p>\u65E0\u7F13\u51B2\u4E0B <span class="kw">jobs &lt;- 1</span> \u4E0E\u67D0\u4E00\u4E2A <span class="kw">&lt;-jobs</span>\uFF08range \u5185\u90E8\uFF09\u914D\u5BF9\u5B8C\u6210\uFF1B\u53E6\u5916\u4E24\u4E2A\u7EE7\u7EED\u7B49\u3002</p>
+          <p class="muted">\u771F\u5B9E\u8C03\u5EA6\u4E0B\u4E5F\u53EF\u80FD\u662F worker2/3 \u62A2\u5230\uFF1B\u6F14\u793A\u56FA\u5B9A\u7ED9 worker1\uFF0C\u65B9\u4FBF\u770B\u6E05\u201C\u4E0D\u662F\u6BCF\u4EBA\u4E00\u4EFD\u201D\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1A\u53D1\u9001 ch<- \xB7 \u63A5\u6536 \xB7 \u914D\u5BF9/\u63E1\u624B \u2014\u2014 3 \u4EBA\u62A2 1 \u4E2A\u4EFB\u52A1",log:"\u4EC5 worker1 \u6536\u5230\u4EFB\u52A1 1\uFF1Bworker2/3 \u4ECD\u963B\u585E\u5728 range"},{title:"worker1 \u5904\u7406\u5B8C\uFF0C\u518D\u8FDB range",hl:[6,7,8],wg:3,closed:!1,token:!1,main:"\u53D1\u9001\u5DF2\u5B8C\u6210\uFF0C\u51C6\u5907 close(jobs)",workers:["\u5904\u7406\u5B8C\u6BD5\uFF0C\u518D\u6B21\u5361\u5728 range \u7B49\u5F85","\u4ECD\u5728 range \u7B49\u5F85\u2026","\u4ECD\u5728 range \u7B49\u5F85\u2026"],active:["w1"],note:`<p>worker1 \u7684 <span class="kw">_ = j</span> \u8DD1\u5B8C\u540E\uFF0C\u5FAA\u73AF\u7EE7\u7EED\uFF0C\u53C8\u56DE\u5230 <span class="kw">range</span> \u7B49\u4E0B\u4E00\u6B21\u63A5\u6536\u3002</p>
+          <p>\u6B64\u65F6\u4E09\u4E2A worker \u518D\u6B21\u90FD\u5728\u7B49\uFF1B\u8BA1\u6570\u4ECD\u662F 3\uFF08\u8FD8\u6CA1\u4EBA\u9000\u51FA\uFF0C<span class="kw">Done</span> \u8FD8\u6CA1\u6267\u884C\uFF09\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1Arange \u4F1A\u4E00\u76F4\u63A5\u6536\uFF0C\u76F4\u5230 channel \u88AB close",log:"\u4EFB\u52A1\u5904\u7406\u5B8C\uFF1B\u65E0\u4EBA Done\uFF0CWaitGroup \u4ECD\u4E3A 3"},{title:"close(jobs)",hl:[12],wg:3,closed:!0,token:!1,main:"close(jobs)\uFF1A\u58F0\u660E\u4E0D\u4F1A\u518D\u53D1\u9001",workers:["\u53D1\u73B0 channel \u5DF2\u5173\u95ED\u4E14\u65E0\u5269\u4F59\u6570\u636E \u2192 \u7ED3\u675F range","\u53D1\u73B0 channel \u5DF2\u5173\u95ED\u4E14\u65E0\u5269\u4F59\u6570\u636E \u2192 \u7ED3\u675F range","\u53D1\u73B0 channel \u5DF2\u5173\u95ED\u4E14\u65E0\u5269\u4F59\u6570\u636E \u2192 \u7ED3\u675F range"],active:["main","channel","w1","w2","w3"],note:`<p><span class="kw">close(jobs)</span> \u901A\u77E5\u6240\u6709\u63A5\u6536\u65B9\uFF1A\u4E0D\u4F1A\u518D\u6709\u65B0\u4EFB\u52A1\u3002</p>
+          <p>\u7F13\u51B2\u533A\uFF08\u8FD9\u91CC\u5BB9\u91CF 0\uFF09\u4E5F\u6CA1\u6709\u6B8B\u7559\u503C\uFF0C\u4E8E\u662F\u4E09\u4E2A worker \u7684 <span class="kw">for range</span> \u90FD\u7ED3\u675F\u3002</p>
+          <p class="muted">\u6CA1\u62A2\u5230\u4EFB\u52A1\u7684 worker2/3 \u4E5F\u4F1A\u56E0 close \u800C\u6B63\u5E38\u9000\u51FA\u2014\u2014\u8FD9\u6B63\u662F\u201C\u4F18\u96C5\u6536\u5DE5\u201D\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1Aclose \xB7 range \u7ED3\u675F \u2014\u2014 \u6CA1\u62FF\u5230\u4EFB\u52A1\u7684\u4EBA\u4E5F\u4F1A\u9000\u51FA",log:"close \u540E\uFF0C3 \u4E2A range \u5168\u90E8\u7ED3\u675F"},{title:"defer wg.Done() \xD7 3",hl:[5],wg:0,closed:!0,token:!1,main:"\u4ECD\u5728 wg.Wait() \u4E0A\u963B\u585E\u2026",workers:["\u51FD\u6570\u8FD4\u56DE \u2192 defer Done\uFF08\u8BA1\u6570 -1\uFF09","\u51FD\u6570\u8FD4\u56DE \u2192 defer Done\uFF08\u8BA1\u6570 -1\uFF09","\u51FD\u6570\u8FD4\u56DE \u2192 defer Done\uFF08\u8BA1\u6570 -1\uFF09"],active:["w1","w2","w3","wg"],doneWorkers:!0,note:`<p>\u6BCF\u4E2A worker \u51FD\u6570\u8FD4\u56DE\u524D\u6267\u884C <span class="kw">defer wg.Done()</span>\uFF0C\u8BA1\u6570 3\u21922\u21921\u21920\u3002</p>
+          <p><span class="kw">defer</span> \u4FDD\u8BC1\u5373\u4FBF\u4E2D\u95F4\u6709\u63D0\u524D return\uFF0C\u4E5F\u4F1A\u51CF\u8BA1\u6570\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1Adefer \xB7 Done \u2014\u2014 \u8BA1\u6570\u51CF 1",log:"\u4E09\u6B21 Done \u540E WaitGroup = 0"},{title:"wg.Wait() \u8FD4\u56DE",hl:[13],wg:0,closed:!0,token:!1,main:"\u8BA1\u6570\u5F52\u96F6\uFF0CWait \u8FD4\u56DE\uFF0Cmain \u7EE7\u7EED/\u7ED3\u675F",workers:["\u5DF2\u9000\u51FA","\u5DF2\u9000\u51FA","\u5DF2\u9000\u51FA"],active:["main","wg"],doneWorkers:!0,note:`<p><span class="kw">wg.Wait()</span> \u4E00\u76F4\u963B\u585E\u5230\u8BA1\u6570\u4E3A 0\uFF0C\u7136\u540E\u8FD4\u56DE\u3002</p>
+          <p>\u6574\u6761\u6D41\u7A0B\uFF1A<strong>Add\xD73 \u2192 \u542F\u52A8\u5E76 range \u7B49\u5F85 \u2192 \u53D1\u9001 1 \u4E2A\u4EFB\u52A1\uFF08\u4EC5 1 \u4EBA\u5904\u7406\uFF09\u2192 close \u2192 \u5168\u90E8\u9000\u51FA range \u2192 Done\xD73 \u2192 Wait \u8FD4\u56DE</strong>\u3002</p>`,tip:"\u5173\u952E\u8BCD\uFF1AWait \u2014\u2014 \u7B49\u5230\u6240\u6709 worker \u7684 Done",log:"\u6F14\u793A\u7ED3\u675F\uFF1A\u4F18\u96C5\u9000\u51FA\u5B8C\u6210\uFF0C\u65E0\u6B7B\u9501"}];let idx=0,timer=null;const $=id=>document.getElementById(id),workerIds=["w1","w2","w3"];function renderCode(hl){const set=new Set(hl);$("codeBlock").innerHTML=CODE_LINES.map((line,i)=>{const safe=line.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");return set.has(i)?`<span class="hl">${safe}</span>`:safe}).join(`
+`)}function clearActive(){["mainActor","w1","w2","w3","channelBox","wgBox"].forEach(id=>{$(id).classList.remove("active")}),workerIds.forEach(id=>$(id).classList.remove("done-state"))}function applyStep(i){const s=steps[i];idx=i,$("stepNum").textContent=i,$("stepTotal").textContent=steps.length-1,$("stepTitle").textContent=s.title,$("wgCount").textContent=s.wg,$("wgCount").classList.toggle("zero",s.wg===0),$("mainStatus").textContent=s.main,s.workers.forEach((t,k)=>$(`w${k+1}Status`).textContent=t),clearActive(),(s.active||[]).forEach(a=>{a==="main"?$("mainActor").classList.add("active"):a==="channel"?$("channelBox").classList.add("active","hot"):a==="wg"?$("wgBox").classList.add("active"):workerIds.includes(a)&&$(a).classList.add("active")}),(s.active||[]).includes("channel")||$("channelBox").classList.remove("hot"),$("channelBox").classList.toggle("closed",!!s.closed),$("chMeta").textContent=s.closed?"\u5DF2 close \xB7 range \u5C06\u7ED3\u675F":"\u5BB9\u91CF 0 \xB7 \u53D1\u9001/\u63A5\u6536\u5FC5\u987B\u914D\u5BF9",$("jobToken").classList.toggle("show",!!s.token),s.doneWorkers&&workerIds.forEach(id=>$(id).classList.add("done-state")),renderCode(s.hl),$("noteBody").innerHTML=s.note,$("tipBox").textContent=s.tip,$("log").innerHTML=`<div class="now">\u25CF ${s.log}</div>`,$("btnPrev").disabled=i<=0,$("btnNext").disabled=i>=steps.length-1}function stopAuto(){timer&&(clearInterval(timer),timer=null,$("btnAuto").textContent="\u81EA\u52A8\u64AD\u653E")}$("btnNext").onclick=()=>{stopAuto(),idx<steps.length-1&&applyStep(idx+1)},$("btnPrev").onclick=()=>{stopAuto(),idx>0&&applyStep(idx-1)},$("btnReset").onclick=()=>{stopAuto(),applyStep(0)},$("btnAuto").onclick=()=>{if(timer){stopAuto();return}$("btnAuto").textContent="\u6682\u505C",idx>=steps.length-1&&applyStep(0),timer=setInterval(()=>{if(idx>=steps.length-1){stopAuto();return}applyStep(idx+1)},1800)},applyStep(0);
+</script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>

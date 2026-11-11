@@ -1,0 +1,29 @@
+﻿# AN的小站
+> AN 的个人技术博客，记录前端基础、框架原理、算法、网络与 AI 相关的学习笔记和随笔。
+
+## Key Pages
+- [主页](https://an2333.com/)
+- [归档](https://an2333.com/archive/)
+- [关于我](https://an2333.com/about/)
+
+## Recent Posts
+- [给 JS 开发者的 Go 基础：变量、切片、struct 和指针](https://an2333.com/posts/go/01-basics-for-js-devs/): 按 JavaScript 的直觉对照 Go：package 入口、变量与零值、for、error 返回值、数组和切片、map、struct、指针与方法。这是「Go 复习笔记」系列第一篇。
+- [Go 接口、nil 坑与 panic / defer / recover](https://an2333.com/posts/go/02-interface-nil-panic/): 接口靠方法集隐式实现；typed nil 放进接口后接口不等于 nil。panic、defer 的 LIFO，以及 recover 必须在同一个 goroutine 里由 deferred 函数直接调用。
+- [goroutine、channel、select 与 worker 池](https://an2333.com/posts/go/03-goroutine-channel-select/): goroutine 是轻量并发单元；无缓冲 channel 是握手，有缓冲 channel 是有限队列。再看 close、range、select、死锁，以及多人抢同一条 jobs 的 worker 池。
+- [WaitGroup、Mutex、atomic 与 GMP 调度（概念）](https://an2333.com/posts/go/04-waitgroup-mutex-gmp/): 用 WaitGroup 等一组 goroutine 收工，用 Mutex / RWMutex 保护共享内存，用 atomic 做单变量计数。最后用 GMP 的概念看 goroutine 怎么被调度——这是演示级理解，不是 runtime 排障经验。
+- [Go context：协作取消，不是强杀 goroutine](https://an2333.com/posts/go/05-context-cancellation/): context 把取消、超时和请求级值绑在同一条调用链上。Background 是空根，cancel 的实质是关闭 Done。必须自己听信号；runtime 不会因为 cancel 就杀掉 goroutine。
+- [K8s 核心概念图解：从一家汉堡店开始](https://an2333.com/posts/essay/k8s-concepts/): 一份可交互的 Kubernetes 入门图解：集群、Pod、工作负载、Service、Ingress、Helm、镜像仓库，点一点就能看懂请求怎么流转。
+- [React常用Hooks](https://an2333.com/posts/framework/react/react%E5%B8%B8%E7%94%A8hooks/): React没提供太多的Hooks，比如 useState、useEffect、useCallback、useMemo、useRef、useContext 等等，…
+- [React为什么有Hooks](https://an2333.com/posts/framework/react/react%E4%B8%BA%E4%BB%80%E4%B9%88%E6%9C%89hooks/): React组件本质就是Model到View的映射。
+- [React是什么？](https://an2333.com/posts/framework/react/react%E6%98%AF%E4%BB%80%E4%B9%88/): React的中文含义是反应或者响应。 React的核心原理是：当数据变化时，UI能自动把变化反应出来。
+- [书单](https://an2333.com/posts/input/book/): 读过的成长类和金融类书籍。
+- [JavaScript的快慢属性](https://an2333.com/posts/frontend/browser/v8/javascript%E4%B8%AD%E5%AF%B9%E8%B1%A1%E7%9A%84%E5%BF%AB%E6%85%A2%E5%B1%9E%E6%80%A7/): V8 中对象由隐藏类、Properties 和 Elements 构成，快属性和慢属性分别是怎么存储的。
+- [V8如何执行JavaScript代码的](https://an2333.com/posts/frontend/browser/v8/v8%E5%A6%82%E4%BD%95%E6%89%A7%E8%A1%8Cjavascript%E4%BB%A3%E7%A0%81%E7%9A%84/): V8 是什么，以及它如何把 JavaScript 编译成机器码并执行。
+- [V8-隐藏类和内联缓存IC](https://an2333.com/posts/frontend/browser/v8/%E5%86%85%E8%81%94%E7%BC%93%E5%AD%98ic/): 对于以上的代码，底层是如何实现的呢？
+- [如何通过d8深入分析对象](https://an2333.com/posts/frontend/browser/v8/%E5%A6%82%E4%BD%95%E9%80%9A%E8%BF%87d8%E6%B7%B1%E5%85%A5%E5%88%86%E6%9E%90%E5%AF%B9%E8%B1%A1/): 为了更深入理解JavaScript中的对象，需要安装d8(V8调试工具)
+- [树](https://an2333.com/posts/basic/algorithm/tree/): 数组和链表是所有数据结构的基础。
+- [102. 二叉树的层序遍历](https://an2333.com/posts/basic/algorithm/tree/102%E4%BA%8C%E5%8F%89%E6%A0%91%E7%9A%84%E5%B1%82%E5%BA%8F%E9%81%8D%E5%8E%86/): 思路就是用BFS(广度优先遍历),用嵌套数组携带层级信息用于判断是哪一层
+- [二叉树的先中后序遍历](https://an2333.com/posts/basic/algorithm/tree/%E4%BA%8C%E5%8F%89%E6%A0%91%E7%9A%84%E5%85%88%E4%B8%AD%E5%90%8E%E5%BA%8F%E9%81%8D%E5%8E%86/): 递归
+- [树的深度优先和广度优先遍历](https://an2333.com/posts/basic/algorithm/tree/%E6%B7%B1%E5%BA%A6%E4%BC%98%E5%85%88%E5%92%8C%E5%B9%BF%E5%BA%A6%E4%BC%98%E5%85%88%E9%81%8D%E5%8E%86/): 以看书为例理解树的深度优先遍历（DFS）和广度优先遍历（BFS），以及 JavaScript 实现。
+- [CSRF攻击 - 陌生链接](https://an2333.com/posts/frontend/browser/security/csrf/): 全称 Cross-site request forgery 跨站请求伪造, 就是黑客引诱已经登录的用户打开黑客的网站, 然后在黑客网站中利用用户的登录状态来发起…
+- [浏览器安全-XSS攻击](https://an2333.com/posts/frontend/browser/security/xss/): 全称Cross Site Scripting 就是跨网站脚本

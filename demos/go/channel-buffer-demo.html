@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-go-demo-id="channel-buffer-demo">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Go Channel：无缓冲 vs 有缓冲</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --danger: #f07178;
+      --slot: #243044;
+      --slot-fill: #2a6f97;
+      --sender: #4c6ef5;
+      --receiver: #12b886;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+    h1 {
+      font-size: 1.45rem;
+      font-weight: 650;
+      margin: 0 0 6px;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 20px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .modes {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .mode-btn, .ctrl button {
+      border: 1px solid var(--border);
+      background: #121a26;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .mode-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #041018;
+      font-weight: 600;
+    }
+    .ctrl {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .ctrl button:hover { border-color: var(--accent); }
+    .ctrl button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .stage {
+      display: grid;
+      grid-template-columns: 120px 1fr 120px;
+      gap: 12px;
+      align-items: center;
+      min-height: 180px;
+      margin: 8px 0 12px;
+    }
+    @media (max-width: 640px) {
+      .stage {
+        grid-template-columns: 1fr;
+        justify-items: center;
+      }
+    }
+    .actor {
+      border-radius: 12px;
+      padding: 14px 10px;
+      text-align: center;
+      border: 2px solid transparent;
+      min-height: 110px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      transition: box-shadow .25s, border-color .25s, transform .25s;
+    }
+    .sender { background: rgba(76,110,245,.15); border-color: rgba(76,110,245,.45); }
+    .receiver { background: rgba(18,184,134,.15); border-color: rgba(18,184,134,.45); }
+    .actor.blocking {
+      border-color: var(--danger);
+      box-shadow: 0 0 0 3px rgba(240,113,120,.25);
+      animation: pulse 1s ease-in-out infinite;
+    }
+    .actor.handshake {
+      border-color: var(--ok);
+      box-shadow: 0 0 0 3px rgba(62,207,142,.3);
+      transform: scale(1.03);
+    }
+    .actor .label { font-weight: 650; font-size: 0.95rem; }
+    .actor .status {
+      font-size: 0.8rem;
+      color: var(--muted);
+      min-height: 1.2em;
+    }
+    .actor .status.hot { color: var(--warn); font-weight: 600; }
+    .actor .status.ok { color: var(--ok); font-weight: 600; }
+    .packet {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--warn);
+      color: #1a1200;
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin: 0 auto;
+    }
+    .packet.ghost { opacity: 0.25; background: #555; color: #ccc; }
+    .channel {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 14px 12px;
+      background: #121a26;
+      position: relative;
+      min-height: 120px;
+    }
+    .channel-title {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .slots {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-height: 52px;
+      align-items: center;
+    }
+    .slot {
+      width: 52px;
+      height: 52px;
+      border-radius: 10px;
+      background: var(--slot);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      position: relative;
+      transition: background .25s, transform .25s;
+    }
+    .slot.filled {
+      background: var(--slot-fill);
+      border-color: #3d9cf0;
+      transform: translateY(-2px);
+    }
+    .slot .idx {
+      position: absolute;
+      bottom: -18px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .unbuf-pipe {
+      height: 8px;
+      border-radius: 999px;
+      background: #2a3548;
+      width: 70%;
+      margin: 18px auto 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .unbuf-pipe .flight {
+      position: absolute;
+      top: -14px;
+      left: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--warn);
+      color: #1a1200;
+      font-weight: 700;
+      font-size: 0.75rem;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .unbuf-pipe .flight.show {
+      display: flex;
+      animation: fly 0.55s ease-in-out forwards;
+    }
+    @keyframes fly {
+      from { left: 0; opacity: 1; }
+      to { left: calc(100% - 32px); opacity: 1; }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.72; }
+    }
+    .log {
+      margin-top: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      background: #0c121b;
+      border-radius: 10px;
+      padding: 10px 12px;
+      max-height: 140px;
+      overflow: auto;
+      border: 1px solid var(--border);
+    }
+    .log div { margin: 2px 0; }
+    .log .hi { color: var(--accent); }
+    .log .bad { color: var(--danger); }
+    .log .good { color: var(--ok); }
+    .side h2 {
+      font-size: 1rem;
+      margin: 0 0 10px;
+    }
+    .side h3 {
+      font-size: 0.88rem;
+      margin: 14px 0 6px;
+      color: var(--accent);
+    }
+    .side p, .side li {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .side ul { padding-left: 1.1em; margin: 0; }
+    .side li { margin: 4px 0; }
+    .tip {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(240,180,41,.1);
+      border: 1px solid rgba(240,180,41,.35);
+      color: #f5d78e;
+      font-size: 0.85rem;
+    }
+    .legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .legend .l-send::before { background: var(--sender); }
+    .legend .l-recv::before { background: var(--receiver); }
+    .legend .l-data::before { background: var(--warn); }
+    .legend .l-block::before { background: var(--danger); }
+  </style>
+  <script>window.parent!==window&&document.documentElement.classList.add("go-demo-is-embed");
+</script>
+  <link rel="stylesheet" href="/demos/go/_go-demo-embed-child.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>Go Channel 动态对比：无缓冲 vs 有缓冲</h1>
+    <p class="sub">点「发送 / 接收」看阻塞与交接；容量 3 的有缓冲像有限货架。</p>
+
+    <div class="layout">
+      <div class="card">
+        <div class="modes">
+          <button class="mode-btn active" id="btnUnbuf" type="button">无缓冲</button>
+          <button class="mode-btn" id="btnBuf" type="button">有缓冲（容量 3）</button>
+        </div>
+
+        <div class="legend">
+          <span class="l-send">发送方</span>
+          <span class="l-recv">接收方</span>
+          <span class="l-data">数据</span>
+          <span class="l-block">阻塞</span>
+        </div>
+
+        <div class="ctrl">
+          <button type="button" id="btnSend">发送一次</button>
+          <button type="button" id="btnRecv">接收一次</button>
+          <button type="button" id="btnReset">重置</button>
+          <button type="button" id="btnAuto">自动演示</button>
+        </div>
+
+        <div class="stage">
+          <div class="actor sender" id="senderBox">
+            <div class="label">发送方</div>
+            <div class="packet ghost" id="senderPkt">?</div>
+            <div class="status" id="senderStatus">空闲</div>
+          </div>
+
+          <div class="channel">
+            <div class="channel-title" id="chanTitle">chan（无缓冲 · 容量 0）</div>
+            <div class="slots" id="slots"></div>
+            <div class="unbuf-pipe" id="pipe" hidden>
+              <div class="flight" id="flight">1</div>
+            </div>
+          </div>
+
+          <div class="actor receiver" id="receiverBox">
+            <div class="label">接收方</div>
+            <div class="packet ghost" id="receiverPkt">?</div>
+            <div class="status" id="receiverStatus">空闲</div>
+          </div>
+        </div>
+
+        <div class="log" id="log" aria-live="polite"></div>
+      </div>
+
+      <aside class="card side">
+        <h2>什么时候用？</h2>
+        <h3>无缓冲 <code>make(chan T)</code></h3>
+        <ul>
+          <li>强同步：发送和接收必须「握手」同时完成</li>
+          <li>确认对方已经收到</li>
+          <li>传递所有权 / 发信号（通知）</li>
+        </ul>
+        <h3>有缓冲 <code>make(chan T, 3)</code></h3>
+        <ul>
+          <li>削峰填谷：生产者偶尔比消费者快</li>
+          <li>两边速率不同，减少互相干等</li>
+          <li>注意：别当无限队列；满了仍会阻塞</li>
+        </ul>
+        <div class="tip" id="modeTip">
+          当前：无缓冲。发送方举起数据时，必须有接收方伸手接，谁先到谁等。
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>(function(){let mode="unbuf",queue=[],nextVal=1,sendBlocked=!1,recvBlocked=!1,pendingSend=null,pendingRecv=!1,busy=!1,autoTimer=null,autoStep=0;const el=id=>document.getElementById(id),logEl=el("log"),slotsEl=el("slots"),senderBox=el("senderBox"),receiverBox=el("receiverBox"),senderStatus=el("senderStatus"),receiverStatus=el("receiverStatus"),senderPkt=el("senderPkt"),receiverPkt=el("receiverPkt"),chanTitle=el("chanTitle"),pipe=el("pipe"),flight=el("flight"),modeTip=el("modeTip");function log(msg,cls){const d=document.createElement("div");cls&&(d.className=cls),d.textContent=msg,logEl.prepend(d)}function setBusy(v){busy=v,el("btnSend").disabled=v,el("btnRecv").disabled=v,autoTimer||(el("btnAuto").disabled=v)}function renderSlots(){if(slotsEl.innerHTML="",mode==="unbuf"){pipe.hidden=!1;const empty=document.createElement("div");empty.style.color="var(--muted)",empty.style.fontSize="0.85rem",empty.textContent=sendBlocked||recvBlocked?"\u7B49\u5F85\u63E1\u624B\uFF08\u65E0\u8D27\u67B6\uFF0C\u5FC5\u987B\u4E24\u8FB9\u540C\u65F6\u5C31\u7EEA\uFF09":"\u5BB9\u91CF 0 \xB7 \u65E0\u6CD5\u6682\u5B58\uFF0C\u5FC5\u987B\u53D1\u9001/\u63A5\u6536\u78B0\u9762",slotsEl.appendChild(empty);return}pipe.hidden=!0;for(let i=0;i<3;i++){const s=document.createElement("div");s.className="slot"+(queue[i]!==void 0?" filled":""),s.textContent=queue[i]!==void 0?String(queue[i]):"";const idx=document.createElement("span");idx.className="idx",idx.textContent="\u69FD"+i,s.appendChild(idx),slotsEl.appendChild(s)}}function updateActors(){senderBox.classList.toggle("blocking",sendBlocked),receiverBox.classList.toggle("blocking",recvBlocked),sendBlocked?(senderStatus.textContent="\u963B\u585E \xB7 \u7B49\u5F85\u63A5\u6536",senderStatus.className="status hot",senderPkt.className="packet",senderPkt.textContent=String(pendingSend)):(senderStatus.textContent="\u7A7A\u95F2",senderStatus.className="status",senderPkt.className="packet ghost",senderPkt.textContent="?"),recvBlocked?(receiverStatus.textContent="\u963B\u585E \xB7 \u7B49\u5F85\u53D1\u9001",receiverStatus.className="status hot",receiverPkt.className="packet ghost",receiverPkt.textContent="?"):(receiverStatus.textContent="\u7A7A\u95F2",receiverStatus.className="status")}function flashHandshake(val){senderBox.classList.add("handshake"),receiverBox.classList.add("handshake"),receiverPkt.className="packet",receiverPkt.textContent=String(val),receiverStatus.textContent="\u6536\u5230 "+val,receiverStatus.className="status ok",setTimeout(()=>{senderBox.classList.remove("handshake"),receiverBox.classList.remove("handshake")},500)}function resetState(silent){stopAuto(),queue=[],nextVal=1,sendBlocked=!1,recvBlocked=!1,pendingSend=null,pendingRecv=!1,flight.classList.remove("show"),silent||(logEl.innerHTML="",log("\u5DF2\u91CD\u7F6E","hi")),renderSlots(),updateActors(),setBusy(!1)}function setMode(m){mode=m,el("btnUnbuf").classList.toggle("active",m==="unbuf"),el("btnBuf").classList.toggle("active",m==="buf"),chanTitle.textContent=m==="unbuf"?"chan\uFF08\u65E0\u7F13\u51B2 \xB7 \u5BB9\u91CF 0\uFF09":"chan\uFF08\u6709\u7F13\u51B2 \xB7 \u5BB9\u91CF 3\uFF09",modeTip.textContent=m==="unbuf"?"\u5F53\u524D\uFF1A\u65E0\u7F13\u51B2\u3002\u53D1\u9001\u65B9\u4E3E\u8D77\u6570\u636E\u65F6\uFF0C\u5FC5\u987B\u6709\u63A5\u6536\u65B9\u4F38\u624B\u63A5\uFF0C\u8C01\u5148\u5230\u8C01\u7B49\u3002":"\u5F53\u524D\uFF1A\u6709\u7F13\u51B2\u3002\u8D27\u67B6\u6709\u7A7A\u4F4D\u5C31\u80FD\u5148\u653E\u4E0B\uFF1B\u88C5\u6EE1\u540E\u518D\u53D1\u624D\u4F1A\u963B\u585E\u3002\u63A5\u6536\u4F1A\u817E\u51FA\u7A7A\u4F4D\u3002",resetState(!0),log(m==="unbuf"?"\u5207\u6362\u5230\u65E0\u7F13\u51B2\u6A21\u5F0F":"\u5207\u6362\u5230\u6709\u7F13\u51B2\uFF08\u5BB9\u91CF 3\uFF09","hi")}function tryCompleteUnbuf(){if(sendBlocked&&recvBlocked&&pendingSend!==null){const val=pendingSend;return sendBlocked=!1,recvBlocked=!1,pendingSend=null,pendingRecv=!1,setBusy(!0),flight.textContent=String(val),flight.classList.remove("show"),flight.offsetWidth,flight.classList.add("show"),log("\u63E1\u624B\u6210\u529F\uFF1A\u4F20\u9012 "+val,"good"),setTimeout(()=>{flight.classList.remove("show"),flashHandshake(val),updateActors(),renderSlots(),setBusy(!1)},560),!0}return!1}function doSend(){if(busy)return;const val=nextVal;if(mode==="unbuf"){if(sendBlocked){log("\u53D1\u9001\u65B9\u5DF2\u5728\u963B\u585E\u4E2D\uFF0C\u5148\u63A5\u6536\u6216\u91CD\u7F6E","bad");return}pendingSend=val,nextVal+=1,sendBlocked=!0,log("ch <- "+val+"  \u2192 \u53D1\u9001\u963B\u585E\uFF08\u7B49\u63A5\u6536\u65B9\uFF09","bad"),updateActors(),renderSlots(),tryCompleteUnbuf();return}if(sendBlocked){log("\u7F13\u51B2\u5DF2\u6EE1\uFF0C\u53D1\u9001\u65B9\u4ECD\u963B\u585E","bad");return}if(queue.length<3){if(queue.push(val),nextVal+=1,log("ch <- "+val+"  \u2192 \u653E\u5165\u69FD\u4F4D\uFF08\u4E0D\u963B\u585E\uFF09\u5BB9\u91CF "+queue.length+"/3","good"),recvBlocked){const got=queue.shift();recvBlocked=!1,pendingRecv=!1,log("\u63A5\u6536\u65B9\u6B63\u5728\u7B49 \u2192 \u7ACB\u523B\u62FF\u5230 "+got,"good"),flashHandshake(got)}renderSlots(),updateActors();return}pendingSend=val,nextVal+=1,sendBlocked=!0,log("ch <- "+val+"  \u2192 \u7F13\u51B2\u5DF2\u6EE1\uFF0C\u53D1\u9001\u963B\u585E","bad"),updateActors(),renderSlots()}function doRecv(){if(!busy){if(mode==="unbuf"){if(recvBlocked){log("\u63A5\u6536\u65B9\u5DF2\u5728\u963B\u585E\u4E2D","bad");return}recvBlocked=!0,pendingRecv=!0,log("<-ch  \u2192 \u63A5\u6536\u963B\u585E\uFF08\u7B49\u53D1\u9001\u65B9\uFF09","bad"),updateActors(),renderSlots(),tryCompleteUnbuf();return}if(recvBlocked){log("\u63A5\u6536\u65B9\u5DF2\u5728\u963B\u585E\u4E2D","bad");return}if(queue.length>0){const got=queue.shift();log("<-ch  \u2192 \u53D6\u51FA "+got+"\uFF08\u5269\u4F59 "+queue.length+"/3\uFF09","good"),sendBlocked&&pendingSend!==null&&(queue.push(pendingSend),log("\u53D1\u9001\u65B9\u89E3\u9664\u963B\u585E\uFF0C\u653E\u5165 "+pendingSend,"good"),pendingSend=null,sendBlocked=!1),flashHandshake(got),renderSlots(),updateActors();return}recvBlocked=!0,pendingRecv=!0,log("<-ch  \u2192 \u7F13\u51B2\u4E3A\u7A7A\uFF0C\u63A5\u6536\u963B\u585E","bad"),sendBlocked&&pendingSend!==null&&queue.length,updateActors(),renderSlots()}}function stopAuto(){autoTimer&&(clearTimeout(autoTimer),autoTimer=null),el("btnAuto").textContent="\u81EA\u52A8\u6F14\u793A",autoStep=0}function schedule(fn,ms){autoTimer=setTimeout(fn,ms)}function runAuto(){if(autoTimer){stopAuto(),log("\u505C\u6B62\u81EA\u52A8\u6F14\u793A","hi");return}resetState(!0),log("\u5F00\u59CB\u81EA\u52A8\u6F14\u793A\u2026","hi"),el("btnAuto").textContent="\u505C\u6B62\u6F14\u793A";const steps=mode==="unbuf"?[()=>{log("\u2460 \u5148\u53D1\u9001\uFF1A\u65E0\u4EBA\u63A5\u6536 \u2192 \u963B\u585E","hi"),doSend()},()=>{log("\u2461 \u518D\u63A5\u6536\uFF1A\u63E1\u624B\u5B8C\u6210","hi"),doRecv()},()=>{log("\u2462 \u5148\u63A5\u6536\uFF1A\u65E0\u4EBA\u53D1\u9001 \u2192 \u963B\u585E","hi"),doRecv()},()=>{log("\u2463 \u518D\u53D1\u9001\uFF1A\u63E1\u624B\u5B8C\u6210","hi"),doSend()}]:[()=>{log("\u2460 \u8FDE\u7EED\u53D1\u9001 3 \u6B21\uFF0C\u586B\u6EE1\u8D27\u67B6","hi"),doSend()},()=>{doSend()},()=>{doSend()},()=>{log("\u2461 \u7B2C 4 \u6B21\u53D1\u9001 \u2192 \u963B\u585E","hi"),doSend()},()=>{log("\u2462 \u63A5\u6536\u4E00\u6B21 \u2192 \u817E\u51FA\u7A7A\u4F4D\uFF0C\u53D1\u9001\u65B9\u89E3\u9664\u963B\u585E","hi"),doRecv()},()=>{doRecv()},()=>{doRecv()},()=>{doRecv()}];let i=0;function next(){if(i>=steps.length){log("\u81EA\u52A8\u6F14\u793A\u7ED3\u675F","good"),stopAuto();return}const waitBusy=()=>{if(busy){schedule(waitBusy,80);return}steps[i++](),schedule(next,900)};waitBusy()}next()}el("btnUnbuf").addEventListener("click",()=>setMode("unbuf")),el("btnBuf").addEventListener("click",()=>setMode("buf")),el("btnSend").addEventListener("click",doSend),el("btnRecv").addEventListener("click",doRecv),el("btnReset").addEventListener("click",()=>resetState(!1)),el("btnAuto").addEventListener("click",runAuto),setMode("unbuf")})();
+</script>
+  <script src="/demos/go/_go-demo-embed-child.js" defer></script>
+</body>
+</html>
